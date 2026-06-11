@@ -1440,8 +1440,50 @@ export function extractionFunction(
     };
     const cleanTaskText = (raw: string): string =>
       raw.replace(/\s+/g, ' ').replace(/^\$\s*/, '').trim();
+    const isInTranscript = (el: Element): boolean =>
+      !!el.closest('.composer-messages-container, [data-flat-index], .composer-human-ai-pair-container');
+    const backgroundSummaryRe = /^(\d+)\s+background\s+(?:terminal|task)s?$/i;
+    const hasSummaryChevron = (row: Element): boolean =>
+      !!row.querySelector(
+        '.codicon-chevron-right, .codicon-chevron-down, i[data-icon-name="chevron-right"], i[data-icon-name="chevron-down"]',
+      );
+    const isFinishedToolCallLine = (el: Element): boolean => {
+      const line = el.closest('.ui-tool-call-line, .ui-collapsible-header');
+      if (!line) return false;
+      const action = line.querySelector('.ui-tool-call-line-action, .ui-collapsible-action');
+      return /^finished$/i.test(cleanTaskText(action?.textContent || ''));
+    };
+    const collectBackgroundSummary = (root: Element, source: 'toolbar' | 'transcript'): void => {
+      for (const el of Array.from(root.querySelectorAll('div, span'))) {
+        const label = cleanTaskText(el.textContent || '');
+        const match = label.match(backgroundSummaryRe);
+        if (!match) continue;
+        if (Array.from(el.children).some(child => backgroundSummaryRe.test(cleanTaskText(child.textContent || '')))) {
+          continue;
+        }
+        if (source === 'transcript' && isFinishedToolCallLine(el)) continue;
 
-    const toolbarBackgroundJobs = container.querySelectorAll('.composer-toolbar-background-job-item');
+        const row =
+          el.closest('.composer-toolbar-background-job-item-clickable') ||
+          el.closest('.group[style*="cursor: pointer"], .group[style*="cursor:pointer"]') ||
+          el.closest('[style*="cursor: pointer"]') ||
+          el.parentElement;
+        if (!row || seenBackgroundCards.has(row)) continue;
+        if (!hasSummaryChevron(row)) continue;
+
+        const summaryCount = parseInt(match[1], 10);
+        if (!Number.isFinite(summaryCount) || summaryCount <= 0) continue;
+
+        seenBackgroundCards.add(row);
+        backgroundTasks.push({
+          id: `background:summary:${source}:${buildSelectorPath(row)}`,
+          label,
+          expandSelectorPath: buildSelectorPath(row),
+        });
+      }
+    };
+
+    const toolbarBackgroundJobs = document.querySelectorAll('.composer-toolbar-background-job-item');
     for (const job of Array.from(toolbarBackgroundJobs)) {
       const stopEl = job.querySelector('.composer-toolbar-background-job-item-stop, [class*="background-job"][class*="stop"]');
       if (!stopEl) continue;
@@ -1460,11 +1502,68 @@ export function extractionFunction(
       });
     }
 
-    const backgroundStopButtons = Array.from(container.querySelectorAll('button')) as HTMLButtonElement[];
-    for (const stopBtn of backgroundStopButtons) {
-      const stopLabel = `${getButtonLabel(stopBtn)} ${stopBtn.getAttribute('aria-label') || ''} ${stopBtn.getAttribute('title') || ''}`.trim();
-      if (!stopLabelRe.test(stopLabel)) continue;
+    // Live background count lives in #composer-toolbar-section above the input box.
+    for (const toolbarRoot of [
+      document.querySelector('#composer-toolbar-section'),
+      document.querySelector('.composer-bar.editor #composer-toolbar-section'),
+      document.querySelector('.composer-bar #composer-toolbar-section'),
+    ]) {
+      if (toolbarRoot && !seenBackgroundCards.has(toolbarRoot)) {
+        collectBackgroundSummary(toolbarRoot, 'toolbar');
+      }
+    }
 
+    const foregroundWaitingRe = /Waiting for (\d+) commands? to finish/i;
+    for (const nudge of Array.from(document.querySelectorAll('.composer-foreground-shell-background-nudge-line'))) {
+      if (seenBackgroundCards.has(nudge)) continue;
+      const actionText = cleanTaskText(
+        nudge.querySelector('.ui-tool-call-line-action')?.textContent || nudge.textContent || '',
+      );
+      const match = actionText.match(foregroundWaitingRe);
+      if (!match) continue;
+      const waitCount = parseInt(match[1], 10);
+      if (!Number.isFinite(waitCount) || waitCount <= 0) continue;
+
+      const relatedShell = nudge.closest('[data-flat-index]')?.querySelector('.ui-shell-tool-call--with-stop')
+        ?? nudge.parentElement?.querySelector('.ui-shell-tool-call--with-stop');
+      const stopEl = relatedShell?.querySelector('.ui-shell-tool-call__glass-stop');
+
+      seenBackgroundCards.add(nudge);
+      backgroundTasks.push({
+        id: `foreground:waiting:${buildSelectorPath(nudge)}`,
+        label: `Waiting for ${waitCount} command${waitCount === 1 ? '' : 's'} to finish`,
+        ...(stopEl ? { stopSelectorPath: buildSelectorPath(stopEl) } : {}),
+      });
+    }
+
+    // Transcript may surface active (non-finished) background summaries separately from the toolbar.
+    const transcriptRoot = container.querySelector('.composer-messages-container') ?? container;
+    collectBackgroundSummary(transcriptRoot, 'transcript');
+
+    let maxSummaryCount = 0;
+    for (const task of backgroundTasks) {
+      const match = task.label.trim().match(backgroundSummaryRe);
+      if (match) maxSummaryCount = Math.max(maxSummaryCount, parseInt(match[1], 10));
+    }
+
+    const detailedCount = backgroundTasks.filter(task => !backgroundSummaryRe.test(task.label.trim())).length;
+    if (maxSummaryCount > detailedCount) {
+      const hasSummaryLabel = backgroundTasks.some(task => {
+        const summaryMatch = task.label.trim().match(backgroundSummaryRe);
+        return summaryMatch && parseInt(summaryMatch[1], 10) === maxSummaryCount;
+      });
+      if (!hasSummaryLabel) {
+        backgroundTasks.push({
+          id: `background:summary:count:${maxSummaryCount}`,
+          label: `${maxSummaryCount} background ${maxSummaryCount === 1 ? 'terminal' : 'terminals'}`,
+        });
+      }
+    }
+
+    const backgroundStopButtons = Array.from(
+      document.querySelectorAll('.ui-shell-tool-call__glass-stop, button[aria-label="Stop command"]'),
+    ) as HTMLButtonElement[];
+    for (const stopBtn of backgroundStopButtons) {
       const card =
         stopBtn.closest('.ui-shell-tool-call') ||
         stopBtn.closest('.ui-tool-call-card') ||

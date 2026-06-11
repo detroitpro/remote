@@ -30,6 +30,8 @@ interface AppProps {
   skipAuth?: boolean;
 }
 
+type BooleanStateSetter = (value: boolean | ((prev: boolean) => boolean)) => void;
+
 const QUEUE_ACTION_LABELS: Record<string, string> = {
   send: 'Send now',
   remove: 'Remove',
@@ -64,12 +66,48 @@ function commandResultData<T>(result: CommandResult): T | null {
 }
 
 function getVisibleBackgroundTasks(state: CursorState): BackgroundTask[] {
-  return (state.backgroundTasks || []).filter(task => !!task.stopSelectorPath);
+  return state.backgroundTasks || [];
+}
+
+function isForegroundWaitingBackgroundTask(task: BackgroundTask): boolean {
+  return /^Waiting for \d+ commands? to finish$/i.test(task.label.trim());
+}
+
+function getBackgroundTaskCount(tasks: BackgroundTask[]): number {
+  const summaryRe = /^(\d+)\s+background\s+(?:terminal|task)s?$/i;
+  const waitingRe = /^Waiting for (\d+) commands? to finish$/i;
+  let maxSummaryCount = 0;
+  let maxWaitingCount = 0;
+  let detailedCount = 0;
+
+  for (const task of tasks) {
+    const label = task.label.trim();
+    const summaryMatch = label.match(summaryRe);
+    const waitingMatch = label.match(waitingRe);
+    if (summaryMatch) {
+      maxSummaryCount = Math.max(maxSummaryCount, parseInt(summaryMatch[1], 10));
+    } else if (waitingMatch) {
+      maxWaitingCount = Math.max(maxWaitingCount, parseInt(waitingMatch[1], 10));
+    } else {
+      detailedCount++;
+    }
+  }
+
+  if (maxSummaryCount > 0 || maxWaitingCount > 0) {
+    return Math.max(maxSummaryCount + maxWaitingCount, detailedCount, maxSummaryCount, maxWaitingCount);
+  }
+  return detailedCount;
+}
+
+function getBackgroundTasksForSheet(tasks: BackgroundTask[]): BackgroundTask[] {
+  return tasks.filter(task => !isForegroundWaitingBackgroundTask(task));
 }
 
 function getVisibleGitStatus(state: CursorState) {
   return state.gitStatus?.available ? state.gitStatus : null;
 }
+
+const OPTIMISTIC_STOP_SELECTOR = '[data-stop-button="true"], .composer-button-area .codicon-debug-stop, .send-with-mode .codicon-debug-stop';
 
 export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
   const socket = useMemo(() => providedSocket ?? createSocket(), [providedSocket]);
@@ -84,6 +122,7 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
   const [activePlanModal, setActivePlanModal] = useState<PlanBlock | null>(null);
   const [planModalBody, setPlanModalBody] = useState('');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [sendPending, setSendPending] = useState(false);
 
   const showToast = useCallback((message: string, type?: 'success' | 'error') => {
     const id = newCommandId();
@@ -155,6 +194,24 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
     };
   }, [authReady, commandClient, showToast, socket]);
 
+  useEffect(() => {
+    if (!sendPending) return;
+    const hasLiveWork = remoteState.agentActivityLive
+      || remoteState.agentStatus !== 'idle'
+      || (remoteState.backgroundTasks?.length || 0) > 0;
+    if (hasLiveWork) {
+      setSendPending(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setSendPending(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [
+    remoteState.agentActivityLive,
+    remoteState.agentStatus,
+    remoteState.backgroundTasks,
+    sendPending,
+  ]);
+
   const ui = useMemo(() => ({
     activeSheet,
     queueSheetItem,
@@ -197,25 +254,43 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
     <RemoteStateContext.Provider value={remoteState}>
       <CommandClientContext.Provider value={commandClient}>
         <UiStateContext.Provider value={ui}>
-          <CursorRemoteShell state={remoteState} socketConnected={socketConnected} authReady={authReady} />
+          <CursorRemoteShell
+            state={remoteState}
+            socketConnected={socketConnected}
+            authReady={authReady}
+            sendPending={sendPending}
+            setSendPending={setSendPending}
+          />
         </UiStateContext.Provider>
       </CommandClientContext.Provider>
     </RemoteStateContext.Provider>
   );
 }
 
-function CursorRemoteShell({ state, socketConnected, authReady }: { state: CursorState; socketConnected: boolean; authReady: boolean }) {
+function CursorRemoteShell({
+  state,
+  socketConnected,
+  authReady,
+  sendPending,
+  setSendPending,
+}: {
+  state: CursorState;
+  socketConnected: boolean;
+  authReady: boolean;
+  sendPending: boolean;
+  setSendPending: BooleanStateSetter;
+}) {
   const serverHealth = useServerHealth(authReady);
   return (
     <>
-      <HeaderStatus state={state} socketConnected={socketConnected} serverHealth={serverHealth} />
+      <HeaderStatus state={state} socketConnected={socketConnected} serverHealth={serverHealth} sendPending={sendPending} />
       <ComposerQueueBar queue={state.composerQueue?.items || []} queueLabel={state.composerQueue?.queueLabel} />
       <WindowBar windows={state.windows || []} activeWindowId={state.activeWindowId} />
       <TabBar tabs={state.chatTabs || []} />
       <MessageViewport state={state} />
       <ApprovalBar approvals={state.pendingApprovals || []} />
       <QuestionnaireBar state={state} />
-      <ComposerInput state={state} serverHealth={serverHealth} />
+      <ComposerInput state={state} serverHealth={serverHealth} setSendPending={setSendPending} />
       <BottomSheetHost state={state} serverHealth={serverHealth} socketConnected={socketConnected} />
       <PlanModal />
       <ToastHost />
@@ -257,9 +332,21 @@ function getConnectionUiState(state: CursorState, socketConnected: boolean) {
   };
 }
 
-function HeaderStatus({ state, socketConnected, serverHealth }: { state: CursorState; socketConnected: boolean; serverHealth: HealthSnapshot | null }) {
+function HeaderStatus({
+  state,
+  socketConnected,
+  serverHealth,
+  sendPending,
+}: {
+  state: CursorState;
+  socketConnected: boolean;
+  serverHealth: HealthSnapshot | null;
+  sendPending: boolean;
+}) {
   const ui = React.useContext(UiStateContext)!;
   const command = useCommandClient();
+  const [stopPending, setStopPending] = useState(false);
+  const lastKnownStopSelectorRef = useRef('');
   const connection = getConnectionUiState(state, socketConnected);
   const labels: Record<string, string> = {
     idle: 'Idle',
@@ -271,18 +358,34 @@ function HeaderStatus({ state, socketConnected, serverHealth }: { state: CursorS
   };
   const activity = (state.agentActivityText || '').trim();
   const showActivity = state.agentActivityLive && activity && state.agentStatus !== 'idle';
-  const statusText = showActivity
+  const rawStatusText = showActivity
     ? (activity.length > 56 ? `${activity.slice(0, 55)}...` : activity)
     : (labels[state.agentStatus] || state.agentStatus);
   const headerRightClass = 'header-right';
   const stopSelectorPath = state.agentStopSelectorPath || state.backgroundTasks?.find(task => task.stopSelectorPath)?.stopSelectorPath || '';
-  const hasActiveWork = state.agentActivityLive || state.agentStatus !== 'idle' || (state.backgroundTasks?.length || 0) > 0;
-  const stopEnabled = hasActiveWork && !!stopSelectorPath;
+  if (stopSelectorPath) {
+    lastKnownStopSelectorRef.current = stopSelectorPath;
+  }
+  const effectiveStopSelectorPath = stopSelectorPath
+    || (sendPending ? (lastKnownStopSelectorRef.current || OPTIMISTIC_STOP_SELECTOR) : '');
+  const hasActiveWork = sendPending || state.agentActivityLive || state.agentStatus !== 'idle' || (state.backgroundTasks?.length || 0) > 0;
+  const stopEnabled = !stopPending && hasActiveWork && !!effectiveStopSelectorPath;
+  const statusText = stopPending ? 'Stopping...' : sendPending && !showActivity && state.agentStatus === 'idle' ? 'Sending...' : rawStatusText;
   const statusStyle = state.agentStatus === 'waiting_approval'
     ? { color: 'var(--accent-yellow)' }
     : state.agentStatus === 'error'
       ? { color: 'var(--accent-red)' }
       : undefined;
+
+  useEffect(() => {
+    if (!stopPending) return;
+    if (!hasActiveWork || !stopSelectorPath) {
+      setStopPending(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setStopPending(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [hasActiveWork, stopPending, stopSelectorPath, state.agentActivityLive, state.agentActivityText, state.agentStatus, state.backgroundTasks]);
 
   return (
     <header id="header">
@@ -305,7 +408,7 @@ function HeaderStatus({ state, socketConnected, serverHealth }: { state: CursorS
         <span id="agent-status-icon">{state.agentStatus === 'waiting_approval' ? '!' : state.agentStatus === 'error' ? 'x' : ''}</span>
         <span
           id="agent-status-text"
-          className={showActivity ? 'agent-status-shimmer' : ''}
+          className={!stopPending && (showActivity || sendPending) ? 'agent-status-shimmer' : ''}
           style={statusStyle}
         >
           {statusText}
@@ -316,9 +419,14 @@ function HeaderStatus({ state, socketConnected, serverHealth }: { state: CursorS
           type="button"
           aria-label="Stop agent"
           disabled={!stopEnabled}
-          onClick={() => {
+          onClick={async () => {
             if (!stopEnabled) return;
-            command.emit('command:click_action', { selectorPath: stopSelectorPath });
+            setStopPending(true);
+            const result = await command.sendCommandAwaitResult('command:click_action', { selectorPath: effectiveStopSelectorPath });
+            if (!result.ok) {
+              setStopPending(false);
+              ui.showToast(result.error || 'Stop failed', 'error');
+            }
           }}
         >
           <span aria-hidden="true" />
@@ -971,7 +1079,15 @@ interface PendingAttachment {
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
 
-function ComposerInput({ state, serverHealth }: { state: CursorState; serverHealth: HealthSnapshot | null }) {
+function ComposerInput({
+  state,
+  serverHealth,
+  setSendPending,
+}: {
+  state: CursorState;
+  serverHealth: HealthSnapshot | null;
+  setSendPending: BooleanStateSetter;
+}) {
   const command = useCommandClient();
   const ui = React.useContext(UiStateContext)!;
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -983,6 +1099,7 @@ function ComposerInput({ state, serverHealth }: { state: CursorState; serverHeal
   const canSend = !inputDisabled && (text.trim().length > 0 || attachments.length > 0);
   const currentMode = modeUi(state.mode?.current);
   const backgroundTasks = getVisibleBackgroundTasks(state);
+  const backgroundTaskCount = getBackgroundTaskCount(backgroundTasks);
   const gitStatus = getVisibleGitStatus(state);
 
   const clearAttachments = useCallback(() => {
@@ -1023,20 +1140,34 @@ function ComposerInput({ state, serverHealth }: { state: CursorState; serverHeal
     reader.readAsDataURL(file);
   }, [attachments.length, ui]);
 
-  const sendMessage = useCallback(() => {
+  const sendMessage = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed && attachments.length === 0) return;
-    command.emit('command:send_message', {
+    setSendPending(true);
+    const result = await command.sendCommandAwaitResult('command:send_message', {
       ...(trimmed ? { text: trimmed } : {}),
       ...(attachments.length ? {
         attachments: attachments.map(att => ({ mimeType: att.mimeType, name: att.name, data: att.data })),
       } : {}),
     });
+    if (!result.ok) {
+      setSendPending(false);
+      ui.showToast(result.error || 'Failed to send message', 'error');
+      return;
+    }
     setText('');
     clearAttachments();
     requestAnimationFrame(() => autosize({ allowShrink: true }));
     ui.showToast('Message sent', 'success');
-  }, [attachments, autosize, clearAttachments, command, text, ui]);
+  }, [attachments, autosize, clearAttachments, command, setSendPending, text, ui]);
+
+  const openBackgroundTasks = useCallback(() => {
+    const expandSelectorPath = backgroundTasks.find(task => task.expandSelectorPath)?.expandSelectorPath;
+    if (expandSelectorPath) {
+      command.emit('command:click_action', { selectorPath: expandSelectorPath });
+    }
+    ui.openSheet('background-tasks');
+  }, [backgroundTasks, command, ui]);
 
   const handlePaste = useCallback((event: React.ClipboardEvent) => {
     const items = event.clipboardData?.items;
@@ -1092,12 +1223,12 @@ function ComposerInput({ state, serverHealth }: { state: CursorState; serverHeal
           )}
           <button
             id="pill-background-tasks"
-            className={`background-task-pill${backgroundTasks.length === 0 ? ' count-pill-idle' : ''}`}
+            className={`background-task-pill${backgroundTaskCount === 0 ? ' count-pill-idle' : ''}`}
             type="button"
-            aria-label={`${backgroundTasks.length} background task${backgroundTasks.length === 1 ? '' : 's'}`}
-            onClick={() => ui.openSheet('background-tasks')}
+            aria-label={`${backgroundTaskCount} background task${backgroundTaskCount === 1 ? '' : 's'}`}
+            onClick={openBackgroundTasks}
           >
-            B:{backgroundTasks.length}
+            B:{backgroundTaskCount}
           </button>
         </div>
       </div>
@@ -1405,7 +1536,7 @@ function QueueActionsSheet({ visible }: { visible: boolean }) {
 function BackgroundTasksSheet({ state, visible }: { state: CursorState; visible: boolean }) {
   const ui = React.useContext(UiStateContext)!;
   const command = useCommandClient();
-  const tasks = getVisibleBackgroundTasks(state);
+  const tasks = getBackgroundTasksForSheet(getVisibleBackgroundTasks(state));
   return (
     <div id="sheet-background-tasks" className={`bottom-sheet ${visible ? '' : 'hidden'}`}>
       <div className="sheet-header">Background Tasks</div>

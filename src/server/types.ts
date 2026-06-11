@@ -81,6 +81,7 @@ export interface BackgroundTask {
   id: string;
   label: string;
   detail?: string;
+  expandSelectorPath?: string;
   stopSelectorPath?: string;
 }
 

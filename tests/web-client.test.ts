@@ -577,13 +577,13 @@ describe('web: background tasks', () => {
     });
 
     const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
-    assert.equal(pill.textContent, 'B:1');
+    assert.equal(pill.textContent, 'B:2');
 
     act(() => pill.click());
     const sheet = env.document.getElementById('sheet-background-tasks')!;
     assert.ok(!sheet.classList.contains('hidden'));
     assert.match(sheet.textContent || '', /npm run dev/);
-    assert.doesNotMatch(sheet.textContent || '', /npm test --watch/);
+    assert.match(sheet.textContent || '', /npm test --watch/);
 
     const stop = sheet.querySelector('.background-task-stop') as HTMLButtonElement;
     act(() => stop.click());
@@ -591,6 +591,68 @@ describe('web: background tasks', () => {
     const sent = env.mockSocket.emitted.find(item => item.event === 'command:click_action');
     assert.ok(sent, 'Expected stop to emit click_action');
     assert.equal((sent.args[0] as { selectorPath?: string }).selectorPath, '#stop-one');
+  });
+
+  it('counts collapsed background terminal summary rows in the pill', () => {
+    fireFullState(env.mockSocket, {
+      ...baseState(),
+      backgroundTasks: [{ id: 'summary', label: '1 background terminal', expandSelectorPath: '#expand-summary' }],
+    });
+
+    const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
+    assert.equal(pill.textContent, 'B:1');
+    assert.ok(!pill.classList.contains('count-pill-idle'));
+
+    act(() => pill.click());
+
+    const sent = env.mockSocket.emitted.find(item => item.event === 'command:click_action');
+    assert.ok(sent, 'Expected background summary click to emit click_action');
+    assert.equal((sent.args[0] as { selectorPath?: string }).selectorPath, '#expand-summary');
+
+    const sheet = env.document.getElementById('sheet-background-tasks')!;
+    assert.ok(!sheet.classList.contains('hidden'));
+  });
+
+  it('counts background task summary labels from Cursor chrome', () => {
+    fireFullState(env.mockSocket, {
+      ...baseState(),
+      backgroundTasks: [{ id: 'summary', label: '2 background tasks' }],
+    });
+
+    const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
+    assert.equal(pill.textContent, 'B:2');
+  });
+
+  it('adds toolbar background count and foreground waiting commands for the pill', () => {
+    fireFullState(env.mockSocket, {
+      ...baseState(),
+      backgroundTasks: [
+        { id: 'summary', label: '1 background terminal' },
+        { id: 'waiting', label: 'Waiting for 1 command to finish' },
+      ],
+    });
+
+    const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
+    assert.equal(pill.textContent, 'B:2');
+  });
+
+  it('does not render foreground waiting commands in the background task sheet', () => {
+    fireFullState(env.mockSocket, {
+      ...baseState(),
+      backgroundTasks: [
+        { id: 'summary', label: '1 background terminal' },
+        { id: 'waiting', label: 'Waiting for 2 commands to finish', stopSelectorPath: '#stop-waiting' },
+      ],
+    });
+
+    const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
+    assert.equal(pill.textContent, 'B:3');
+
+    act(() => pill.click());
+
+    const sheet = env.document.getElementById('sheet-background-tasks')!;
+    assert.ok(!sheet.classList.contains('hidden'));
+    assert.doesNotMatch(sheet.textContent || '', /Waiting for 2 commands to finish/);
   });
 
   it('does not count foreground loading tool messages as background tasks', () => {

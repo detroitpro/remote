@@ -60,4 +60,40 @@ describe('state manager: background tasks', () => {
     ]);
     assert.equal(patches[0].agentStopSelectorPath, '#stop-bg');
   });
+
+  it('holds background tasks briefly when extraction misses them during active agent work', async () => {
+    const manager = new StateManager(0);
+    const patches: Partial<CursorState>[] = [];
+    manager.on('state:patch', (patch) => patches.push(patch));
+
+    manager.onExtraction(baseState({
+      agentStatus: 'generating',
+      backgroundTasks: [{ id: 'background:1', label: 'npm run dev', stopSelectorPath: '#stop-bg' }],
+      agentStopSelectorPath: '#stop-bg',
+    }));
+    await nextTick();
+    patches.length = 0;
+
+    manager.onExtraction(baseState({
+      agentStatus: 'generating',
+      backgroundTasks: [],
+      agentStopSelectorPath: '#stop-bg',
+    }));
+    await nextTick();
+
+    assert.deepEqual(manager.getCurrentState().backgroundTasks, [
+      { id: 'background:1', label: 'npm run dev', stopSelectorPath: '#stop-bg' },
+    ]);
+    patches.length = 0;
+
+    manager.onExtraction(baseState({
+      agentStatus: 'idle',
+      backgroundTasks: [],
+      agentStopSelectorPath: '',
+    }));
+    await nextTick();
+
+    assert.equal(patches.length, 1);
+    assert.deepEqual(patches[0].backgroundTasks, []);
+  });
 });

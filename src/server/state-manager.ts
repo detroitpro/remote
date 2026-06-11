@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import type { ChatElement, CursorState, CursorWindow } from './types.js';
 import type { GitSnapshotPushPayload, GitStatusInfo, GitWindowSnapshot } from '../shared/extension-bridge.js';
 import type { GitSnapshotStoreDiagnostics } from '../shared/diagnostics.js';
-import { AGENT_ACTIVITY_STALE_MS } from './activity-stale.js';
+import { AGENT_ACTIVITY_STALE_MS, BACKGROUND_TASKS_STALE_MS } from './activity-stale.js';
 import { filterActionableApprovals } from './approval-filter.js';
 import { mergeMessages } from './message-history.js';
 
@@ -73,6 +73,8 @@ export class StateManager extends EventEmitter {
    * does not re-post activity when the snapshot is otherwise unchanged).
    */
   private activitySuppressedMatch: string | undefined = undefined;
+  private backgroundTasksLastSeen: CursorState['backgroundTasks'] = [];
+  private backgroundTasksLastSeenAt = 0;
   private historyScope = '';
   private messageHistory: ChatElement[] = [];
   private gitWindowSnapshots = new Map<string, GitWindowSnapshot>();
@@ -152,7 +154,9 @@ export class StateManager extends EventEmitter {
     }
     newState.messages = this.messageHistory;
 
-    const stateForApply = this.applyActivityStaleness(newState);
+    const stateForApply = this.applyBackgroundTaskStaleness(
+      this.applyActivityStaleness(newState),
+    );
 
     const patch = this.diff(this.currentState, stateForApply);
     if (!patch) return;
@@ -266,6 +270,32 @@ export class StateManager extends EventEmitter {
 
     this.activityStableText = text;
     this.activityStableSince = now;
+    return newState;
+  }
+
+  private applyBackgroundTaskStaleness(newState: CursorState): CursorState {
+    const nextTasks = newState.backgroundTasks || [];
+    if (nextTasks.length > 0) {
+      this.backgroundTasksLastSeen = nextTasks;
+      this.backgroundTasksLastSeenAt = Date.now();
+      return newState;
+    }
+
+    if (this.backgroundTasksLastSeen.length === 0) {
+      return newState;
+    }
+
+    const agentBusy =
+      newState.agentStatus === 'generating' ||
+      newState.agentStatus === 'running_tool' ||
+      newState.agentStatus === 'thinking';
+    const withinHold = Date.now() - this.backgroundTasksLastSeenAt < BACKGROUND_TASKS_STALE_MS;
+    if (agentBusy && withinHold) {
+      return { ...newState, backgroundTasks: this.backgroundTasksLastSeen };
+    }
+
+    this.backgroundTasksLastSeen = [];
+    this.backgroundTasksLastSeenAt = 0;
     return newState;
   }
 

@@ -3,6 +3,14 @@ import { EventEmitter } from 'events';
 
 const DEFAULT_TIMEOUT_MS = 10000;
 
+export function shouldUseNativeClick(tagName: string | null | undefined, role: string | null | undefined): boolean {
+  const tag = String(tagName || '').trim().toLowerCase();
+  const normalizedRole = String(role || '').trim().toLowerCase();
+  const domClickableTags = new Set(['button', 'a', 'input', 'textarea', 'select', 'option', 'label', 'summary']);
+  const domClickableRoles = new Set(['button', 'link', 'menuitem', 'option', 'checkbox', 'radio', 'switch', 'tab']);
+  return !domClickableTags.has(tag) && !domClickableRoles.has(normalizedRole);
+}
+
 interface CdpMessage {
   id?: number;
   method?: string;
@@ -152,21 +160,50 @@ export class CdpClient extends EventEmitter {
 
   /**
    * Click an element identified by a CSS selector.
-   * Uses evaluate to scroll into view then dispatches a click event.
+   * Uses DOM click for normal controls and native mouse events for generic
+   * clickable containers where Cursor ignores synthetic `el.click()`.
    */
   async click(selector: string): Promise<void> {
-    const clicked = await this.evaluate(`
+    const result = await this.evaluate(`
       (() => {
         const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) return false;
+        if (!el) return { ok: false };
         el.scrollIntoView({ block: 'center', behavior: 'instant' });
-        el.click();
-        return true;
+        const tagName = (el.tagName || '').toLowerCase();
+        const role = (el.getAttribute('role') || '').toLowerCase();
+        const domClickableTags = new Set(['button', 'a', 'input', 'textarea', 'select', 'option', 'label', 'summary']);
+        const domClickableRoles = new Set(['button', 'link', 'menuitem', 'option', 'checkbox', 'radio', 'switch', 'tab']);
+        const useNative = !domClickableTags.has(tagName) && !domClickableRoles.has(role);
+        if (!useNative) {
+          el.click();
+          return { ok: true, usedNative: false };
+        }
+        const r = el.getBoundingClientRect();
+        return {
+          ok: true,
+          usedNative: true,
+          x: r.left + r.width / 2,
+          y: r.top + r.height / 2,
+          width: r.width,
+          height: r.height,
+        };
       })()
-    `);
-    if (!clicked) {
+    `) as {
+      ok?: boolean;
+      usedNative?: boolean;
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+    } | null;
+    if (!result?.ok) {
       throw new Error(`Element not found: ${selector}`);
     }
+    if (!result.usedNative) return;
+    if (!result.width || !result.height || result.x === undefined || result.y === undefined) {
+      throw new Error(`Element not clickable: ${selector}`);
+    }
+    await this.clickAtCoords(result.x, result.y);
   }
 
   /**
