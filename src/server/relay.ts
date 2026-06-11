@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { readFileSync } from 'fs';
 import type { ServerConfig, CursorState, CommandPayload, CommandResult } from './types.js';
+import type { ViteDevServer } from 'vite';
 import { waitForFreshExtraction } from './extraction-wait.js';
 import { validateAttachments } from './message-attachments.js';
 import type { StateManager } from './state-manager.js';
@@ -119,6 +120,7 @@ export class Relay {
   private commandExecutor: CommandExecutor;
   private cdpBridge: CDPBridge;
   private storageHistory: CursorStorageHistory;
+  private viteDevServer?: Promise<ViteDevServer>;
 
   private sessionStore: WebappSessionStore;
   private loginAttempts = new Map<string, RateLimitEntry>();
@@ -176,6 +178,9 @@ export class Relay {
 
   async stop(): Promise<void> {
     this.io.close();
+    if (this.viteDevServer) {
+      await (await this.viteDevServer).close();
+    }
     return new Promise((resolve) => {
       this.httpServer.close(() => resolve());
     });
@@ -234,6 +239,7 @@ export class Relay {
 
   private setupRoutes(): void {
     const clientDir = join(__dirname, '..', 'client');
+    const isSourceClient = clientDir.replace(/\\/g, '/').endsWith('/src/client');
 
     this.app.use(express.json());
 
@@ -336,27 +342,38 @@ export class Relay {
       });
     });
 
-    const cacheBust = Date.now().toString(36);
-    this.app.get('/', (_req, res) => {
-      const htmlPath = join(clientDir, 'index.html');
-      try {
-        let html = readFileSync(htmlPath, 'utf-8');
-        html = html.replace(/(src|href)="([^"]+)\.(js|css)"/g, `$1="$2.$3?v=${cacheBust}"`);
-        res.setHeader('Cache-Control', 'no-store');
-        res.type('html').send(html);
-      } catch (err) {
-        console.error(`[relay] Failed to serve index.html: ${err}`);
-        res.status(500).send('Client files not found');
-      }
-    });
+    if (isSourceClient) {
+      this.app.use(async (req, res, next) => {
+        try {
+          const vite = await this.getViteDevServer(clientDir);
+          vite.middlewares(req, res, next);
+        } catch (err) {
+          next(err);
+        }
+      });
+    } else {
+      const cacheBust = Date.now().toString(36);
+      this.app.get('/', (_req, res) => {
+        const htmlPath = join(clientDir, 'index.html');
+        try {
+          let html = readFileSync(htmlPath, 'utf-8');
+          html = html.replace(/(src|href)="([^"]+)\.(js|css)"/g, `$1="$2.$3?v=${cacheBust}"`);
+          res.setHeader('Cache-Control', 'no-store');
+          res.type('html').send(html);
+        } catch (err) {
+          console.error(`[relay] Failed to serve index.html: ${err}`);
+          res.status(500).send('Client files not found');
+        }
+      });
 
-    this.app.use(express.static(clientDir, {
-      etag: true,
-      lastModified: true,
-      setHeaders: (res) => {
-        res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-      },
-    }));
+      this.app.use(express.static(clientDir, {
+        etag: true,
+        lastModified: true,
+        setHeaders: (res) => {
+          res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+        },
+      }));
+    }
 
     const authMiddleware: express.RequestHandler = (req, res, next) => {
       if (!this.authEnabled) return next();
@@ -370,6 +387,18 @@ export class Relay {
     };
 
     this.app.use(authMiddleware);
+  }
+
+  private getViteDevServer(clientDir: string): Promise<ViteDevServer> {
+    this.viteDevServer ??= import('vite').then(({ createServer }) => createServer({
+      root: clientDir,
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
+      appType: 'spa',
+    }));
+    return this.viteDevServer;
   }
 
   private setupSocketHandlers(): void {

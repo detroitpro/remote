@@ -227,7 +227,7 @@
   },
   "scripts": {
     "dev": "tsx scripts/dev-wrapper.ts",
-    "build": "tsc && rm -rf dist/client && cp -r src/client dist/client && cp node_modules/socket.io/client-dist/socket.io.min.js dist/client/vendor-socket.io.min.js && cp node_modules/socket.io/client-dist/socket.io.min.js.map dist/client/vendor-socket.io.min.js.map",
+    "build": "tsc && vite build",
     "build:ext": "node extension/esbuild.js --production",
     "watch:ext": "node extension/esbuild.js --watch",
     "package": "tsx scripts/bump-build.ts && mkdir -p releases && npx @vscode/vsce package --no-dependencies --out releases/ && tsx scripts/verify-vsix.ts",
@@ -249,7 +249,10 @@
     "express": "^4.21.0",
     "grammy": "^1.41.1",
     "node-html-parser": "^7.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "socket.io": "^4.8.0",
+    "socket.io-client": "^4.8.3",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -258,10 +261,12 @@
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.85.0",
     "@types/ws": "^8.5.0",
+    "@vitejs/plugin-react": "^6.0.2",
     "@vscode/vsce": "^3.0.0",
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.28.0",
     "jsdom": "^29.0.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vite": "^8.0.16"
   }
 }

@@ -15,6 +15,13 @@ export const ALLOWED_ATTACHMENT_MIMES = new Set([
   'image/webp',
 ]);
 
+const ATTACHMENT_PREVIEW_WAIT_MS = 3000;
+const ATTACHMENT_SETTLE_FALLBACK_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export function validateAttachment(
   attachment: MessageAttachment,
   index = 0
@@ -62,6 +69,105 @@ function mimeToExt(mime: string): string {
   }
 }
 
+async function getComposerAttachmentPreviewCount(
+  client: CdpClient,
+  selectors: string[]
+): Promise<number> {
+  const result = await client.evaluate(`
+    (() => {
+      const inputSelectors = ${JSON.stringify(selectors)};
+      const roots = [];
+      for (const sel of inputSelectors) {
+        try {
+          const input = document.querySelector(sel);
+          const root = input?.closest('.composer-bar, [class*="composer"], #workbench\\\\.parts\\\\.auxiliarybar');
+          if (root && !roots.includes(root)) roots.push(root);
+        } catch {}
+      }
+      const fallback = document.querySelector('#workbench\\\\.parts\\\\.auxiliarybar, .composer-bar, [class*="composer"]');
+      if (fallback && !roots.includes(fallback)) roots.push(fallback);
+      const previewSelectors = [
+        'img[src^="blob:"]',
+        'img[src^="data:"]',
+        '[class*="attachment"]',
+        '[class*="Attachment"]',
+        '[class*="image-preview"]',
+        '[class*="ImagePreview"]',
+        '[class*="file-preview"]',
+        '[class*="FilePreview"]',
+        '[class*="composer-file"]',
+        '[class*="ComposerFile"]'
+      ];
+      const seen = new Set();
+      for (const root of roots) {
+        for (const sel of previewSelectors) {
+          try {
+            root.querySelectorAll(sel).forEach((el) => seen.add(el));
+          } catch {}
+        }
+      }
+      return seen.size;
+    })()
+  `) as number;
+  return Number.isFinite(result) ? result : 0;
+}
+
+async function waitForComposerAttachmentPreview(
+  client: CdpClient,
+  selectors: string[],
+  previousCount: number
+): Promise<{ ready: boolean; count: number }> {
+  const result = await client.evaluate(`
+    new Promise((resolve) => {
+      const inputSelectors = ${JSON.stringify(selectors)};
+      const previousCount = ${JSON.stringify(previousCount)};
+      const startedAt = Date.now();
+      const timeoutMs = ${ATTACHMENT_PREVIEW_WAIT_MS};
+      function countPreviews() {
+        const roots = [];
+        for (const sel of inputSelectors) {
+          try {
+            const input = document.querySelector(sel);
+            const root = input?.closest('.composer-bar, [class*="composer"], #workbench\\\\.parts\\\\.auxiliarybar');
+            if (root && !roots.includes(root)) roots.push(root);
+          } catch {}
+        }
+        const fallback = document.querySelector('#workbench\\\\.parts\\\\.auxiliarybar, .composer-bar, [class*="composer"]');
+        if (fallback && !roots.includes(fallback)) roots.push(fallback);
+        const previewSelectors = [
+          'img[src^="blob:"]',
+          'img[src^="data:"]',
+          '[class*="attachment"]',
+          '[class*="Attachment"]',
+          '[class*="image-preview"]',
+          '[class*="ImagePreview"]',
+          '[class*="file-preview"]',
+          '[class*="FilePreview"]',
+          '[class*="composer-file"]',
+          '[class*="ComposerFile"]'
+        ];
+        const seen = new Set();
+        for (const root of roots) {
+          for (const sel of previewSelectors) {
+            try {
+              root.querySelectorAll(sel).forEach((el) => seen.add(el));
+            } catch {}
+          }
+        }
+        return seen.size;
+      }
+      function tick() {
+        const count = countPreviews();
+        if (count > previousCount) return resolve({ ready: true, count });
+        if (Date.now() - startedAt >= timeoutMs) return resolve({ ready: false, count });
+        setTimeout(tick, 100);
+      }
+      tick();
+    })
+  `, ATTACHMENT_PREVIEW_WAIT_MS + 1000) as { ready?: boolean; count?: number } | null;
+  return { ready: !!result?.ready, count: Number(result?.count ?? 0) };
+}
+
 export async function attachFilesToComposer(
   client: CdpClient,
   selectors: string[],
@@ -93,6 +199,8 @@ export async function attachFilesToComposer(
         throw new Error('Composer file input not found');
       }
 
+      const previewCountBefore = await getComposerAttachmentPreviewCount(client, selectors);
+
       await client.send('DOM.setFileInputFiles', { nodeId, files: [tmpPath] });
 
       const changed = await client.evaluate(`
@@ -114,6 +222,14 @@ export async function attachFilesToComposer(
 
       if (!changed?.ok) {
         throw new Error(changed?.error ?? 'Failed to dispatch file input change');
+      }
+
+      const preview = await waitForComposerAttachmentPreview(client, selectors, previewCountBefore);
+      if (preview.ready) {
+        console.log(`[message-attachments] Composer attachment preview detected (${preview.count})`);
+      } else {
+        console.warn('[message-attachments] Composer attachment preview not detected before timeout; waiting fallback settle delay');
+        await sleep(ATTACHMENT_SETTLE_FALLBACK_MS);
       }
     } finally {
       try {

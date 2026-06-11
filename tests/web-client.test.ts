@@ -1,12 +1,13 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { JSDOM } from 'jsdom';
+import React from 'react';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import type { CursorState } from '../src/server/types.js';
-
-const HTML_PATH = resolve('src/client/index.html');
-const APP_JS_PATH = resolve('src/client/app.js');
+import { App } from '../src/client/app/App.js';
 
 type EventHandler = (...args: unknown[]) => void;
 
@@ -25,68 +26,88 @@ function loadFixture(name: string): Array<{ ts: number; state: CursorState | nul
 }
 
 function createTestEnv() {
-  const html = readFileSync(HTML_PATH, 'utf-8');
-  const appJs = readFileSync(APP_JS_PATH, 'utf-8');
-
-  const dom = new JSDOM(html, {
+  const dom = new JSDOM('<!DOCTYPE html><html><body><div id="app"></div></body></html>', {
     url: 'http://localhost:3000/',
-    runScripts: 'dangerously',
     pretendToBeVisual: true,
-    beforeParse(window: Window) {
-      const mockSocket: MockSocket = {
-        handlers: new Map(),
-        connected: true,
-        id: 'test-socket-id',
-        on(event: string, fn: EventHandler) {
-          this.handlers.set(event, fn);
-        },
-        emit() { /* noop for tests */ },
-        fire(event: string, ...args: unknown[]) {
-          const handler = this.handlers.get(event);
-          if (handler) handler(...args);
-        },
-      };
-
-      (window as any).io = function () {
-        return mockSocket;
-      };
-
-      (window as any).__mockSocket = mockSocket;
-
-      const storage: Record<string, string> = {};
-      Object.defineProperty(window, 'localStorage', {
-        value: {
-          getItem: (key: string) => storage[key] ?? null,
-          setItem: (key: string, val: string) => { storage[key] = val; },
-          removeItem: (key: string) => { delete storage[key]; },
-        },
-      });
-
-      (window as any).requestAnimationFrame = (cb: () => void) => {
-        setTimeout(cb, 0);
-        return 0;
-      };
-    },
   });
 
   const window = dom.window;
   const document = window.document;
+  const previousGlobals = {
+    window: (globalThis as any).window,
+    document: (globalThis as any).document,
+    navigator: (globalThis as any).navigator,
+    HTMLElement: (globalThis as any).HTMLElement,
+    FileReader: (globalThis as any).FileReader,
+    Notification: (globalThis as any).Notification,
+    requestAnimationFrame: (globalThis as any).requestAnimationFrame,
+  };
 
-  const scriptEl = document.createElement('script');
-  scriptEl.textContent = appJs;
-  document.body.appendChild(scriptEl);
+  const mockSocket: MockSocket = {
+    handlers: new Map(),
+    connected: true,
+    id: 'test-socket-id',
+    on(event: string, fn: EventHandler) {
+      this.handlers.set(event, fn);
+    },
+    emit() { /* noop for tests */ },
+    fire(event: string, ...args: unknown[]) {
+      const handler = this.handlers.get(event);
+      if (handler) handler(...args);
+    },
+  };
 
-  const mockSocket = (window as any).__mockSocket as MockSocket;
+  Object.defineProperty(window, 'matchMedia', {
+    value: () => ({ matches: false, addEventListener() { /* noop */ }, removeEventListener() { /* noop */ } }),
+    configurable: true,
+  });
+  Object.defineProperty(window, 'scrollTo', { value: () => undefined, configurable: true });
+  (window as any).requestAnimationFrame = (cb: FrameRequestCallback) => {
+    cb(Date.now());
+    return 0;
+  };
+  (window as any).Notification = { permission: 'denied' };
 
-  return { dom, window, document, mockSocket };
+  Object.defineProperty(globalThis, 'window', { value: window, configurable: true });
+  Object.defineProperty(globalThis, 'document', { value: document, configurable: true });
+  Object.defineProperty(globalThis, 'navigator', { value: window.navigator, configurable: true });
+  Object.defineProperty(globalThis, 'HTMLElement', { value: window.HTMLElement, configurable: true });
+  Object.defineProperty(globalThis, 'FileReader', { value: window.FileReader, configurable: true });
+  Object.defineProperty(globalThis, 'Notification', { value: (window as any).Notification, configurable: true });
+  Object.defineProperty(globalThis, 'requestAnimationFrame', { value: (window as any).requestAnimationFrame, configurable: true });
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+  let root: Root;
+  act(() => {
+    root = createRoot(document.getElementById('app')!);
+    root.render(React.createElement(App, { socket: mockSocket, skipAuth: true }));
+  });
+
+  return {
+    dom,
+    window,
+    document,
+    mockSocket,
+    cleanup() {
+      act(() => root.unmount());
+      Object.defineProperty(globalThis, 'window', { value: previousGlobals.window, configurable: true });
+      Object.defineProperty(globalThis, 'document', { value: previousGlobals.document, configurable: true });
+      Object.defineProperty(globalThis, 'navigator', { value: previousGlobals.navigator, configurable: true });
+      Object.defineProperty(globalThis, 'HTMLElement', { value: previousGlobals.HTMLElement, configurable: true });
+      Object.defineProperty(globalThis, 'FileReader', { value: previousGlobals.FileReader, configurable: true });
+      Object.defineProperty(globalThis, 'Notification', { value: previousGlobals.Notification, configurable: true });
+      Object.defineProperty(globalThis, 'requestAnimationFrame', { value: previousGlobals.requestAnimationFrame, configurable: true });
+      dom.window.close();
+    },
+  };
 }
 
 function fireFullState(mockSocket: MockSocket, state: CursorState) {
-  mockSocket.fire('state:full', state);
+  act(() => mockSocket.fire('state:full', state));
 }
 
 function firePatch(mockSocket: MockSocket, patch: Partial<CursorState>) {
-  mockSocket.fire('state:patch', patch);
+  act(() => mockSocket.fire('state:patch', patch));
 }
 
 // ─── Connection status rendering ───
@@ -97,6 +118,8 @@ describe('web: connection status', () => {
   beforeEach(() => {
     env = createTestEnv();
   });
+
+  afterEach(() => env.cleanup());
 
   it('shows connected when extractorStatus is ok', () => {
     const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
@@ -126,6 +149,8 @@ describe('web: agent status', () => {
   beforeEach(() => {
     env = createTestEnv();
   });
+
+  afterEach(() => env.cleanup());
 
   it('shows idle when agent is idle', () => {
     const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
@@ -158,6 +183,8 @@ describe('web: message rendering', () => {
   beforeEach(() => {
     env = createTestEnv();
   });
+
+  afterEach(() => env.cleanup());
 
   it('renders human message', () => {
     const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
@@ -209,6 +236,8 @@ describe('web: approval widgets', () => {
     env = createTestEnv();
   });
 
+  afterEach(() => env.cleanup());
+
   it('renders run_command with command text', () => {
     const fixture = loadFixture('approval-widget-lifecycle.jsonl');
     fireFullState(env.mockSocket, fixture[1].state!);
@@ -248,6 +277,8 @@ describe('web: plan widget', () => {
     env = createTestEnv();
   });
 
+  afterEach(() => env.cleanup());
+
   it('renders plan block with title and progress', () => {
     const fixture = loadFixture('plan-widget.jsonl');
     fireFullState(env.mockSocket, fixture[1].state!);
@@ -266,6 +297,8 @@ describe('web: code block rendering', () => {
   beforeEach(() => {
     env = createTestEnv();
   });
+
+  afterEach(() => env.cleanup());
 
   it('renders diff block with viewport', () => {
     const fixture = loadFixture('code-block-diff.jsonl');
@@ -303,6 +336,8 @@ describe('web: fetch tool', () => {
   beforeEach(() => {
     env = createTestEnv();
   });
+
+  afterEach(() => env.cleanup());
 
   it('renders fetch tool with action text and URL', () => {
     const fixture = loadFixture('fetch-tool.jsonl');
@@ -347,6 +382,8 @@ describe('web: mode/model pills', () => {
     env = createTestEnv();
   });
 
+  afterEach(() => env.cleanup());
+
   it('renders mode and model from state', () => {
     const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
     fireFullState(env.mockSocket, fixture[0].state!);
@@ -357,14 +394,16 @@ describe('web: mode/model pills', () => {
   });
 });
 
-// ─── Questionnaire widget rendering ───
+// ─── Attachment handling ───
 
-describe('web: questionnaire widget', () => {
+describe('web: attachments', () => {
   let env: ReturnType<typeof createTestEnv>;
 
   beforeEach(() => {
     env = createTestEnv();
   });
+
+  afterEach(() => env.cleanup());
 
   function baseState(): CursorState {
     return {
@@ -381,6 +420,76 @@ describe('web: questionnaire widget', () => {
       pendingApprovals: [],
       inputAvailable: true,
       chatTabs: [],
+      activeComposerId: '',
+      mode: { current: 'agent', available: [] },
+      model: { current: 'Auto', currentId: '' },
+      windows: [],
+      activeWindowId: '',
+      composerQueue: { items: [] },
+      questionnaire: null,
+    };
+  }
+
+  it('adds a pasted image only once when paste originates in textarea', async () => {
+    fireFullState(env.mockSocket, baseState());
+    class MockFileReader {
+      result: string | ArrayBuffer | null = 'data:image/png;base64,ZmFrZQ==';
+      onload: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+      readAsDataURL() {
+        this.onload?.();
+      }
+    }
+    Object.defineProperty(globalThis, 'FileReader', { value: MockFileReader, configurable: true });
+    Object.defineProperty(env.window, 'FileReader', { value: MockFileReader, configurable: true });
+
+    const file = new env.window.File(['fake'], 'paste.png', { type: 'image/png' });
+    const event = new env.window.Event('paste', { bubbles: true, cancelable: true }) as Event & {
+      clipboardData?: { items: Array<{ kind: string; type: string; getAsFile(): File }> };
+    };
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+      },
+    });
+
+    const input = env.document.getElementById('message-input')!;
+    await act(async () => {
+      input.dispatchEvent(event);
+    });
+
+    const chips = env.document.querySelectorAll('.attachment-chip');
+    assert.equal(chips.length, 1);
+  });
+});
+
+// ─── Questionnaire widget rendering ───
+
+describe('web: questionnaire widget', () => {
+  let env: ReturnType<typeof createTestEnv>;
+
+  beforeEach(() => {
+    env = createTestEnv();
+  });
+
+  afterEach(() => env.cleanup());
+
+  function baseState(): CursorState {
+    return {
+      connected: true,
+      extractorStatus: 'ok',
+      lastExtractionAt: Date.now(),
+      consecutiveExtractionFailures: 0,
+      lastExtractionError: null,
+      agentStatus: 'idle',
+      agentActivityText: null,
+      agentActivityLive: false,
+      agentActivitySource: 'none',
+      messages: [],
+      pendingApprovals: [],
+      inputAvailable: true,
+      chatTabs: [],
+      activeComposerId: '',
       mode: { current: 'agent', available: [] },
       model: { current: 'Auto', currentId: '' },
       windows: [],
