@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { join, resolve } from 'path';
 import type { ServerConfig, SelectorConfig } from './types.js';
 
 export function loadConfig(): ServerConfig {
@@ -11,6 +11,9 @@ export function loadConfig(): ServerConfig {
     .filter(n => !isNaN(n));
 
   const dataDir = process.env.DATA_DIR ?? resolve(process.cwd(), 'data');
+  const defaultCursorStateDbPath = process.env.APPDATA
+    ? join(process.env.APPDATA, 'Cursor', 'User', 'globalStorage', 'state.vscdb')
+    : undefined;
 
   return {
     cdpUrl: process.env.CDP_URL ?? 'http://127.0.0.1:9222',
@@ -23,6 +26,7 @@ export function loadConfig(): ServerConfig {
     webappPassword: process.env.WEBAPP_PASSWORD ?? '',
     windowTitleQualifier: process.env.WINDOW_TITLE_QUALIFIER !== 'false',
     dataDir,
+    cursorStateDbPath: process.env.CURSOR_STATE_DB_PATH ?? defaultCursorStateDbPath,
     telegram: {
       enabled: process.env.TELEGRAM_ENABLED === 'true',
       botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',

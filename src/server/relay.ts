@@ -6,9 +6,12 @@ import { dirname, join } from 'path';
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { readFileSync } from 'fs';
 import type { ServerConfig, CursorState, CommandPayload, CommandResult } from './types.js';
+import { waitForFreshExtraction } from './extraction-wait.js';
+import { validateAttachments } from './message-attachments.js';
 import type { StateManager } from './state-manager.js';
 import type { CommandExecutor } from './command-executor.js';
 import type { CDPBridge } from './cdp-bridge.js';
+import { CursorStorageHistory } from './cursor-storage-history.js';
 import { markdownToWebHtml, readPlanFile } from './plan-files.js';
 import {
   WEBAPP_SESSION_COOKIE,
@@ -115,6 +118,7 @@ export class Relay {
   private stateManager: StateManager;
   private commandExecutor: CommandExecutor;
   private cdpBridge: CDPBridge;
+  private storageHistory: CursorStorageHistory;
 
   private sessionStore: WebappSessionStore;
   private loginAttempts = new Map<string, RateLimitEntry>();
@@ -136,6 +140,7 @@ export class Relay {
     this.stateManager = stateManager;
     this.commandExecutor = commandExecutor;
     this.cdpBridge = cdpBridge;
+    this.storageHistory = new CursorStorageHistory(config.cursorStateDbPath);
     this.sessionStore = createWebappSessionStore(config.dataDir);
 
     this.app = express();
@@ -395,20 +400,102 @@ export class Relay {
       socket.emit('state:full', this.stateManager.getCurrentState());
 
       socket.on('command:send_message', async (payload: CommandPayload) => {
-        if (!payload.commandId || !payload.text) {
+        const text = (payload.text || '').trim();
+        const attachments = payload.attachments ?? [];
+        if (!payload.commandId || (!text && attachments.length === 0)) {
           socket.emit('command:result', {
             commandId: payload.commandId ?? 'unknown',
             ok: false,
-            error: 'Missing commandId or text',
+            error: 'Missing commandId, text, or attachments',
+          } satisfies CommandResult);
+          return;
+        }
+        const attachmentError = validateAttachments(attachments);
+        if (attachmentError) {
+          socket.emit('command:result', {
+            commandId: payload.commandId,
+            ok: false,
+            error: attachmentError,
           } satisfies CommandResult);
           return;
         }
         console.log(`[relay] Command: send_message from ${socket.id}`);
         const result = await this.commandExecutor.sendMessage(
           payload.commandId,
-          payload.text
+          text || undefined,
+          attachments
         );
         socket.emit('command:result', result);
+      });
+
+      socket.on('command:load_history', async (payload: CommandPayload) => {
+        if (!payload.commandId) {
+          socket.emit('command:result', {
+            commandId: 'unknown',
+            ok: false,
+            error: 'Missing commandId',
+          } satisfies CommandResult);
+          return;
+        }
+        const countBefore = this.stateManager.getCurrentState().messages.length;
+        const currentState = this.stateManager.getCurrentState();
+        const composerId = payload.composerId || currentState.activeComposerId;
+        const times = Math.min(Math.max(payload.times ?? 2, 1), 8);
+        console.log(`[relay] Command: load_history (${times}x) from ${socket.id}`);
+
+        if (composerId) {
+          try {
+            const stored = await this.storageHistory.loadComposerHistory(composerId);
+            if (stored && stored.loadedBubbles > 0) {
+              const merged = this.stateManager.mergeStoredHistory(stored.messages);
+              console.log(
+                `[relay] load_history storage: composer=${composerId.slice(0, 8)} ` +
+                `headers=${stored.totalHeaders} loaded=${stored.loadedBubbles} added=${merged.addedCount}`
+              );
+              socket.emit('command:result', {
+                commandId: payload.commandId,
+                ok: true,
+                data: {
+                  addedCount: merged.addedCount,
+                  totalCount: merged.totalCount,
+                  source: 'cursor_storage',
+                  loadedBubbles: stored.loadedBubbles,
+                  totalHeaders: stored.totalHeaders,
+                },
+              } satisfies CommandResult);
+              return;
+            }
+          } catch (err) {
+            console.warn(
+              `[relay] load_history storage fallback: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        }
+
+        const genBefore = this.stateManager.generation;
+
+        const scrollResult = await this.commandExecutor.scrollChatUp(payload.commandId, times);
+        if (!scrollResult.ok) {
+          socket.emit('command:result', scrollResult);
+          return;
+        }
+
+        await waitForFreshExtraction(this.stateManager, genBefore, 6000);
+        const countAfterScroll = this.stateManager.getCurrentState().messages.length;
+
+        // Return Cursor to the live tail with a single scrollTop jump (no wheel burst).
+        const bottomGen = this.stateManager.generation;
+        const bottomId = `${payload.commandId}-bottom`;
+        await this.commandExecutor.scrollChatToBottom(bottomId);
+        await waitForFreshExtraction(this.stateManager, bottomGen, 3000);
+
+        const totalCount = this.stateManager.getCurrentState().messages.length;
+        const addedCount = Math.max(0, countAfterScroll - countBefore);
+        socket.emit('command:result', {
+          commandId: payload.commandId,
+          ok: true,
+          data: { addedCount, totalCount },
+        } satisfies CommandResult);
       });
 
       socket.on('command:approve', async (payload: CommandPayload) => {

@@ -1,7 +1,8 @@
 import { EventEmitter } from 'events';
-import type { CursorState, CursorWindow } from './types.js';
+import type { ChatElement, CursorState, CursorWindow } from './types.js';
 import { AGENT_ACTIVITY_STALE_MS } from './activity-stale.js';
 import { filterActionableApprovals } from './approval-filter.js';
+import { mergeMessages } from './message-history.js';
 
 function emptyState(): CursorState {
   return {
@@ -45,6 +46,8 @@ export class StateManager extends EventEmitter {
    * does not re-post activity when the snapshot is otherwise unchanged).
    */
   private activitySuppressedMatch: string | undefined = undefined;
+  private historyScope = '';
+  private messageHistory: ChatElement[] = [];
 
   get generation(): number {
     return this._generation;
@@ -57,6 +60,28 @@ export class StateManager extends EventEmitter {
 
   getCurrentState(): CursorState {
     return this.currentState;
+  }
+
+  mergeStoredHistory(messages: ChatElement[]): { addedCount: number; totalCount: number } {
+    if (messages.length === 0) {
+      return { addedCount: 0, totalCount: this.currentState.messages.length };
+    }
+
+    const beforeIds = new Set(this.currentState.messages.map((message) => message.id));
+    const merged = mergeMessages(messages, this.currentState.messages);
+    const addedCount = merged.reduce(
+      (count, message) => count + (beforeIds.has(message.id) ? 0 : 1),
+      0
+    );
+
+    if (addedCount === 0 && merged.length === this.currentState.messages.length) {
+      return { addedCount: 0, totalCount: this.currentState.messages.length };
+    }
+
+    this.messageHistory = merged;
+    this.currentState = { ...this.currentState, messages: merged };
+    this.emit('state:patch', { messages: merged });
+    return { addedCount, totalCount: merged.length };
   }
 
   /**
@@ -85,6 +110,16 @@ export class StateManager extends EventEmitter {
       newState.agentStatus = 'idle';
     }
 
+    const historyScope = this.getHistoryScope(newState);
+    const scopeChanged = historyScope !== this.historyScope;
+    if (scopeChanged) {
+      this.historyScope = historyScope;
+      this.messageHistory = newState.messages.slice();
+    } else {
+      this.messageHistory = mergeMessages(this.messageHistory, newState.messages);
+    }
+    newState.messages = this.messageHistory;
+
     const stateForApply = this.applyActivityStaleness(newState);
 
     const patch = this.diff(this.currentState, stateForApply);
@@ -92,6 +127,20 @@ export class StateManager extends EventEmitter {
 
     this.currentState = stateForApply;
     this.schedulePatch(patch);
+  }
+
+  private getHistoryScope(state: CursorState): string {
+    const activeTab =
+      state.chatTabs.find((t) => t.isActive && t.source === 'open') ??
+      state.chatTabs.find((t) => t.isActive);
+    const tabComposerId = activeTab?.composerId ?? '';
+    const tabTitle = (activeTab?.title ?? '').trim().replace(/\s+/g, ' ');
+    return [
+      state.activeWindowId,
+      state.activeComposerId,
+      tabComposerId,
+      tabTitle,
+    ].join('|');
   }
 
   onExtractionFailure(message: string | null): void {

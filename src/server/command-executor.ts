@@ -1,9 +1,45 @@
 import type { CdpClient } from './cdp-client.js';
-import type { SelectorConfig, CommandResult, PlanModelOption } from './types.js';
+import { attachFilesToComposer } from './message-attachments.js';
+import type { SelectorConfig, CommandResult, MessageAttachment, PlanModelOption } from './types.js';
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 500;
 const FOCUS_DELAY_MS = 100;
+
+const CHAT_SCROLL_HELPERS_JS = `
+  function findChatScrollTarget(strategies) {
+    let container = null;
+    for (const sel of strategies) {
+      try {
+        container = document.querySelector(sel);
+        if (container) break;
+      } catch {}
+    }
+    if (!container) return null;
+
+    const candidates = Array.from(container.querySelectorAll('*'))
+      .filter(el => el.scrollHeight > el.clientHeight + 40)
+      .map(el => {
+        const rect = el.getBoundingClientRect();
+        return {
+          el,
+          flatCount: el.querySelectorAll('[data-flat-index]').length,
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+          visibleArea: Math.max(0, rect.width) * Math.max(0, rect.height),
+          top: rect.top,
+        };
+      })
+      .filter(x => x.clientHeight > 80 && x.visibleArea > 0)
+      .sort((a, b) =>
+        (b.flatCount - a.flatCount) ||
+        (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight)
+      );
+
+    const picked = candidates.find(x => x.flatCount > 0) || candidates[0];
+    return picked?.el || null;
+  }
+`;
 
 // Resolves the currently-open model picker menu element across Cursor versions.
 // Older builds expose `[data-testid="model-picker-menu"]`; newer builds (~3.5.17)
@@ -183,9 +219,22 @@ export class CommandExecutor {
     this.client = client;
   }
 
-  async sendMessage(commandId: string, text: string): Promise<CommandResult> {
+  async sendMessage(
+    commandId: string,
+    text: string | undefined,
+    attachments: MessageAttachment[] = []
+  ): Promise<CommandResult> {
     return this.withRetry(commandId, async (client) => {
       const strategies = this.selectors.chatInput.strategies;
+      const fileInputStrategies = this.selectors.composerFileInput?.strategies ?? [
+        ".composer-bar input[type='file']",
+        "#workbench\\.parts\\.auxiliarybar input[type='file']",
+      ];
+      const trimmed = (text || '').trim();
+      const hasAttachments = attachments.length > 0;
+      if (!trimmed && !hasAttachments) {
+        throw new Error('Message must include text or attachments');
+      }
 
       // Step 1: Find and focus the input element (evaluate only for DOM query + focus)
       const result = await client.evaluate(`
@@ -216,18 +265,26 @@ export class CommandExecutor {
       console.log(`[command-executor] Focused: ${result.info}`);
       await sleep(FOCUS_DELAY_MS);
 
-      // Step 2: Clear any existing text via Ctrl+A then Delete (CDP Input domain)
-      await client.pressKey('a', 'KeyA', 65, 2); // 2 = Ctrl modifier
-      await sleep(50);
-      await client.pressKey('Backspace', 'Backspace', 8);
-      await sleep(50);
+      if (hasAttachments) {
+        await attachFilesToComposer(client, fileInputStrategies, attachments);
+        console.log(`[command-executor] Attached ${attachments.length} file(s) via composer file input`);
+        await sleep(250);
+      }
 
-      // Step 3: Insert text via CDP Input.insertText (native Chromium input pipeline)
-      await client.typeText(text);
-      console.log(`[command-executor] Text inserted via Input.insertText (${text.length} chars)`);
-      await sleep(150);
+      if (trimmed) {
+        if (!hasAttachments) {
+          // Clear any existing text via Ctrl+A then Delete (CDP Input domain)
+          await client.pressKey('a', 'KeyA', 65, 2); // 2 = Ctrl modifier
+          await sleep(50);
+          await client.pressKey('Backspace', 'Backspace', 8);
+          await sleep(50);
+        }
 
-      // Step 4: Submit with Enter via CDP Input.dispatchKeyEvent
+        await client.typeText(trimmed);
+        console.log(`[command-executor] Text inserted via Input.insertText (${trimmed.length} chars)`);
+        await sleep(150);
+      }
+
       await client.pressKey('Enter', 'Enter', 13);
       console.log(`[command-executor] Enter pressed via CDP Input.dispatchKeyEvent`);
     });
@@ -263,23 +320,92 @@ export class CommandExecutor {
     return this.withRetry(commandId, async (client) => {
       const containerSelectors = this.selectors.chatContainer.strategies;
       for (let i = 0; i < times; i++) {
-        await client.evaluate(`
+        const before = await client.evaluate(`
           (() => {
-            const strategies = ${JSON.stringify(containerSelectors)};
-            for (const sel of strategies) {
-              try {
-                const el = document.querySelector(sel);
-                if (el) {
-                  const scrollable = el.querySelector('[class*="scroll"]') || el;
-                  scrollable.scrollTop = 0;
-                  return true;
-                }
-              } catch {}
-            }
-            return false;
+            ${CHAT_SCROLL_HELPERS_JS}
+            const target = findChatScrollTarget(${JSON.stringify(containerSelectors)});
+            if (!target) return { ok: false, error: 'Chat scroll target not found' };
+            const r = target.getBoundingClientRect();
+            const flats = target.querySelectorAll('[data-flat-index]');
+            return {
+              ok: true,
+              x: Math.max(1, r.left + r.width / 2),
+              y: Math.max(1, r.top + Math.min(r.height / 2, 320)),
+              before: target.scrollTop,
+              firstFlat: flats[0]?.getAttribute('data-flat-index') || '',
+              lastFlat: flats[flats.length - 1]?.getAttribute('data-flat-index') || '',
+              flatCount: flats.length,
+              scrollHeight: target.scrollHeight,
+              clientHeight: target.clientHeight,
+            };
           })()
-        `);
-        await sleep(500);
+        `) as {
+          ok: boolean;
+          error?: string;
+          x?: number;
+          y?: number;
+          before?: number;
+          firstFlat?: string;
+          lastFlat?: string;
+          flatCount?: number;
+          scrollHeight?: number;
+          clientHeight?: number;
+        } | null;
+        if (!before?.ok) throw new Error(before?.error ?? 'Failed to find chat scroll target');
+
+        // Cursor's virtualized transcript reacts more reliably to native wheel
+        // input than to assigning scrollTop directly. Send a burst like a user
+        // dragging/scrolling upward, then additionally pin to top as a fallback.
+        for (let j = 0; j < 2; j++) {
+          await client.send('Input.dispatchMouseEvent', {
+            type: 'mouseWheel',
+            x: before.x ?? 1,
+            y: before.y ?? 1,
+            deltaX: 0,
+            deltaY: -600,
+          });
+          await sleep(80);
+        }
+
+        const result = await client.evaluate(`
+          (() => {
+            ${CHAT_SCROLL_HELPERS_JS}
+            const target = findChatScrollTarget(${JSON.stringify(containerSelectors)});
+            if (!target) return { ok: false, error: 'Chat scroll target not found after wheel' };
+            if (target.scrollTop > 24) {
+              target.scrollTop = Math.max(0, target.scrollTop - target.clientHeight * 1.5);
+              target.dispatchEvent(new Event('scroll', { bubbles: true }));
+            }
+            const flats = target.querySelectorAll('[data-flat-index]');
+            return {
+              ok: true,
+              after: target.scrollTop,
+              firstFlat: flats[0]?.getAttribute('data-flat-index') || '',
+              lastFlat: flats[flats.length - 1]?.getAttribute('data-flat-index') || '',
+              flatCount: flats.length,
+              scrollHeight: target.scrollHeight,
+              clientHeight: target.clientHeight,
+            };
+          })()
+        `) as {
+          ok: boolean;
+          error?: string;
+          after?: number;
+          firstFlat?: string;
+          lastFlat?: string;
+          flatCount?: number;
+          scrollHeight?: number;
+          clientHeight?: number;
+        } | null;
+        if (!result?.ok) throw new Error(result?.error ?? 'Failed to scroll chat up');
+        console.log(
+          `[command-executor] Chat scroll up ${i + 1}/${times}: ` +
+          `top ${Math.round(before.before ?? 0)} -> ${Math.round(result.after ?? 0)}, ` +
+          `flat=${result.flatCount ?? 0}, first=${before.firstFlat || '?'}->${result.firstFlat || '?'}, ` +
+          `last=${before.lastFlat || '?'}->${result.lastFlat || '?'}, ` +
+          `h=${result.clientHeight ?? 0}/${result.scrollHeight ?? 0}`
+        );
+        await sleep(450);
       }
       console.log(`[command-executor] Scrolled chat up ${times} times`);
     });
@@ -288,23 +414,38 @@ export class CommandExecutor {
   async scrollChatToBottom(commandId: string): Promise<CommandResult> {
     return this.withRetry(commandId, async (client) => {
       const containerSelectors = this.selectors.chatContainer.strategies;
-      await client.evaluate(`
+      const result = await client.evaluate(`
         (() => {
-          const strategies = ${JSON.stringify(containerSelectors)};
-          for (const sel of strategies) {
-            try {
-              const el = document.querySelector(sel);
-              if (el) {
-                const scrollable = el.querySelector('[class*="scroll"]') || el;
-                scrollable.scrollTop = scrollable.scrollHeight;
-                return true;
-              }
-            } catch {}
-          }
-          return false;
+          ${CHAT_SCROLL_HELPERS_JS}
+          const target = findChatScrollTarget(${JSON.stringify(containerSelectors)});
+          if (!target) return { ok: false, error: 'Chat scroll target not found' };
+          const before = target.scrollTop;
+          target.scrollTop = target.scrollHeight;
+          target.dispatchEvent(new Event('scroll', { bubbles: true }));
+          return {
+            ok: true,
+            before,
+            after: target.scrollTop,
+            flatCount: target.querySelectorAll('[data-flat-index]').length,
+            scrollHeight: target.scrollHeight,
+            clientHeight: target.clientHeight,
+          };
         })()
-      `);
-      console.log('[command-executor] Scrolled chat to bottom');
+      `) as {
+        ok: boolean;
+        error?: string;
+        before?: number;
+        after?: number;
+        flatCount?: number;
+        scrollHeight?: number;
+        clientHeight?: number;
+      } | null;
+      if (!result?.ok) throw new Error(result?.error ?? 'Failed to scroll chat to bottom');
+      console.log(
+        `[command-executor] Scrolled chat to bottom: ` +
+        `top ${Math.round(result.before ?? 0)} -> ${Math.round(result.after ?? 0)}, ` +
+        `flat=${result.flatCount ?? 0}, h=${result.clientHeight ?? 0}/${result.scrollHeight ?? 0}`
+      );
     });
   }
 

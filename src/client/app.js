@@ -98,6 +98,16 @@
 
   let userScrolledUp = false;
   let autoScrollJob = 0;
+  let historyLoading = false;
+  let historyTopArmed = false;
+  let historyScrollPreserve = null;
+  let historySuppressUntil = 0;
+  let forceScrollToBottomOnce = false;
+  let trackedComposerId = '';
+  const HISTORY_TOP_THRESHOLD = 72;
+  const HISTORY_REARM_THRESHOLD = 160;
+  const HISTORY_LOAD_STEPS = 8;
+  const HISTORY_SUPPRESS_MS = 2500;
   let notificationPermission = 'default';
   const notifiedMessageIds = new Set();
   let activePlanModal = null;
@@ -109,16 +119,49 @@
     return $messages.scrollTop + $messages.clientHeight >= $messages.scrollHeight - threshold;
   }
 
-  function scheduleMessagesAutoScroll() {
+  function markUserScrolledUp() {
+    userScrolledUp = true;
+    autoScrollJob++;
+  }
+
+  function hasActiveMessagesSelection() {
+    const selection = window.getSelection ? window.getSelection() : null;
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+    for (let i = 0; i < selection.rangeCount; i++) {
+      const range = selection.getRangeAt(i);
+      if ($messages.contains(range.commonAncestorContainer)) return true;
+      if ($messages.contains(range.startContainer) || $messages.contains(range.endContainer)) return true;
+    }
+    return false;
+  }
+
+  function scrollMessagesToBottom() {
+    const bottom = Math.max(0, $messages.scrollHeight - $messages.clientHeight);
+    if (typeof $messages.scrollTo === 'function') {
+      $messages.scrollTo({ top: bottom, behavior: 'instant' });
+    } else {
+      $messages.scrollTop = bottom;
+    }
+  }
+
+  function scheduleMessagesAutoScroll(force = false) {
     const jobId = ++autoScrollJob;
-    requestAnimationFrame(() => {
+    const scrollAfterLayout = (remainingFrames) => requestAnimationFrame(() => {
       if (jobId !== autoScrollJob) return;
+      if (hasActiveMessagesSelection()) return;
       if (userScrolledUp) return;
-      $messages.scrollTop = $messages.scrollHeight;
+      if (!force && !isNearMessagesBottom()) {
+        userScrolledUp = true;
+        return;
+      }
+      scrollMessagesToBottom();
+      if (force && remainingFrames > 0) scrollAfterLayout(remainingFrames - 1);
     });
+    scrollAfterLayout(force ? 2 : 0);
   }
 
   const $messages = document.getElementById('messages');
+  const $historyLoader = document.getElementById('history-loader');
   const $emptyState = document.getElementById('empty-state');
   const $emptyPrimary = document.getElementById('empty-state-primary');
   const $emptyHint = document.getElementById('empty-state-hint');
@@ -139,7 +182,14 @@
   const $btnQContinue = document.getElementById('btn-q-continue');
   const $input = document.getElementById('message-input');
   const $btnSend = document.getElementById('btn-send');
+  const $btnAttach = document.getElementById('btn-attach');
+  const $attachmentFileInput = document.getElementById('attachment-file-input');
+  const $attachmentStrip = document.getElementById('attachment-strip');
+  const $inputWrapper = document.querySelector('.input-wrapper');
   const $toastContainer = document.getElementById('toast-container');
+  const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+  const MAX_ATTACHMENTS = 5;
+  let pendingAttachments = [];
 
   const $windowBar = document.getElementById('window-bar');
   const $windowList = document.getElementById('window-list');
@@ -191,7 +241,7 @@
       const timer = setTimeout(() => {
         pendingCommandResults.delete(commandId);
         resolve({ commandId, ok: false, error: 'Command timed out' });
-      }, 12000);
+      }, 30000);
 
       pendingCommandResults.set(commandId, (result) => {
         clearTimeout(timer);
@@ -216,6 +266,10 @@
 
   socket.on('state:full', (newState) => {
     state = { ...defaultState, ...newState };
+    trackedComposerId = state.activeComposerId || '';
+    historyTopArmed = false;
+    forceScrollToBottomOnce = true;
+    historySuppressUntil = Date.now() + HISTORY_SUPPRESS_MS;
     renderAll();
   });
 
@@ -230,6 +284,16 @@
       ) {
         patch.agentStatus = 'idle';
       }
+    }
+    if (patch.activeComposerId && patch.activeComposerId !== trackedComposerId) {
+      trackedComposerId = patch.activeComposerId;
+      historyTopArmed = false;
+      historyLoading = false;
+      historyScrollPreserve = null;
+      forceScrollToBottomOnce = true;
+      historySuppressUntil = Date.now() + HISTORY_SUPPRESS_MS;
+      userScrolledUp = false;
+      setHistoryLoaderVisible(false);
     }
     Object.assign(state, patch);
     renderAll();
@@ -250,16 +314,273 @@
     if (!result.ok) showToast(result.error || 'Command failed', 'error');
   });
 
+  function setHistoryLoaderVisible(visible) {
+    if (!$historyLoader) return;
+    $historyLoader.classList.toggle('hidden', !visible);
+  }
+
+  function findFirstVisibleMessageAnchor() {
+    const containerRect = $messages.getBoundingClientRect();
+    const elements = Array.from($messages.querySelectorAll('.chat-el'));
+    for (const el of elements) {
+      const rect = el.getBoundingClientRect();
+      if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+        return {
+          id: el.dataset.id || '',
+          offsetTop: rect.top - containerRect.top,
+        };
+      }
+    }
+    return null;
+  }
+
+  function captureHistoryScrollPreserve(beforeCount) {
+    return {
+      anchor: findFirstVisibleMessageAnchor(),
+      scrollHeightBefore: $messages.scrollHeight,
+      scrollTopBefore: $messages.scrollTop,
+      beforeCount,
+    };
+  }
+
+  function restoreHistoryScrollPreserve(preserve) {
+    const anchorId = preserve.anchor?.id;
+    if (anchorId) {
+      const anchorEl = Array.from($messages.querySelectorAll('.chat-el'))
+        .find((el) => el.dataset.id === anchorId);
+      if (anchorEl) {
+        const containerTop = $messages.getBoundingClientRect().top;
+        const anchorTop = anchorEl.getBoundingClientRect().top - containerTop;
+        $messages.scrollTop += anchorTop - preserve.anchor.offsetTop;
+        return;
+      }
+    }
+
+    const delta = $messages.scrollHeight - preserve.scrollHeightBefore;
+    $messages.scrollTop = preserve.scrollTopBefore + delta;
+  }
+
+  if (window.__CURSOR_REMOTE_TEST__) {
+    window.__cursorRemoteTestApi = {
+      captureHistoryScrollPreserve,
+      restoreHistoryScrollPreserve,
+      autosizeMessageInput,
+    };
+  }
+
+  async function requestOlderHistory() {
+    if (historyLoading || !historyTopArmed || !state.connected) return;
+    historyLoading = true;
+    historyTopArmed = false;
+    setHistoryLoaderVisible(true);
+    markUserScrolledUp();
+
+    const beforeCount = state.messages.length;
+    historyScrollPreserve = captureHistoryScrollPreserve(beforeCount);
+
+    const result = await sendCommandAwaitResult('command:load_history', {
+      commandId: newCommandId(),
+      times: HISTORY_LOAD_STEPS,
+    });
+
+    historyLoading = false;
+    setHistoryLoaderVisible(false);
+
+    if (!result.ok) {
+      historyScrollPreserve = null;
+      showToast(result.error || 'Nepodařilo se načíst historii', 'error');
+      return;
+    }
+
+    const addedCount = result.data && typeof result.data.addedCount === 'number'
+      ? result.data.addedCount
+      : 0;
+    if (addedCount === 0) {
+      historyScrollPreserve = null;
+      showToast('Žádné starší zprávy', 'success');
+    }
+  }
+
+  function maybeLoadOlderHistory() {
+    if (Date.now() < historySuppressUntil) return;
+    if ($messages.scrollTop > HISTORY_REARM_THRESHOLD) {
+      historyTopArmed = true;
+      return;
+    }
+    if (historyLoading || !historyTopArmed || !userScrolledUp || state.messages.length === 0) return;
+    if ($messages.scrollTop > HISTORY_TOP_THRESHOLD) return;
+    void requestOlderHistory();
+  }
+
   $messages.addEventListener('scroll', () => {
     autoScrollJob++;
     userScrolledUp = !isNearMessagesBottom();
-  });
+    maybeLoadOlderHistory();
+  }, { passive: true });
+
+  $messages.addEventListener('wheel', (e) => {
+    if (e.deltaY < 0) {
+      markUserScrolledUp();
+      if ($messages.scrollTop < HISTORY_REARM_THRESHOLD) historyTopArmed = true;
+    }
+  }, { passive: true });
+
+  let messagesTouchStartY = 0;
+  $messages.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) messagesTouchStartY = e.touches[0].clientY;
+  }, { passive: true });
+  $messages.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 1) return;
+    if (e.touches[0].clientY - messagesTouchStartY > 8) {
+      markUserScrolledUp();
+      if ($messages.scrollTop < HISTORY_REARM_THRESHOLD) historyTopArmed = true;
+    }
+  }, { passive: true });
+
+  function canSendMessage() {
+    return !$input.disabled && ($input.value.trim().length > 0 || pendingAttachments.length > 0);
+  }
+
+  function updateSendButton() {
+    $btnSend.disabled = !canSendMessage();
+  }
+
+  function autosizeMessageInput(options = {}) {
+    const allowShrink = options.allowShrink === true;
+    const maxHeight = 120;
+    if (allowShrink || $input.value.length === 0) {
+      $input.style.height = '';
+    }
+
+    const currentHeight = parseFloat($input.style.height || '0') || $input.offsetHeight || 0;
+    const desiredHeight = Math.min($input.scrollHeight, maxHeight);
+    if (allowShrink || desiredHeight > currentHeight + 1) {
+      $input.style.height = `${desiredHeight}px`;
+    }
+    $input.style.overflowY = $input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }
+
+  function renderAttachments() {
+    if (!$attachmentStrip) return;
+    $attachmentStrip.replaceChildren();
+    if (pendingAttachments.length === 0) {
+      $attachmentStrip.classList.add('hidden');
+      updateSendButton();
+      return;
+    }
+    $attachmentStrip.classList.remove('hidden');
+    pendingAttachments.forEach((att) => {
+      const chip = document.createElement('div');
+      chip.className = 'attachment-chip';
+      chip.dataset.id = att.id;
+
+      const img = document.createElement('img');
+      img.src = att.previewUrl;
+      img.alt = att.name || 'Příloha';
+      chip.appendChild(img);
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'attachment-remove';
+      remove.setAttribute('aria-label', 'Odebrat přílohu');
+      remove.textContent = '×';
+      remove.addEventListener('click', () => {
+        pendingAttachments = pendingAttachments.filter((item) => item.id !== att.id);
+        renderAttachments();
+      });
+      chip.appendChild(remove);
+
+      $attachmentStrip.appendChild(chip);
+    });
+    updateSendButton();
+  }
+
+  function clearAttachments() {
+    pendingAttachments = [];
+    renderAttachments();
+    if ($attachmentFileInput) $attachmentFileInput.value = '';
+  }
+
+  function addImageFile(file) {
+    if (!file || !String(file.type || '').startsWith('image/')) {
+      showToast('Podporované jsou jen obrázky', 'error');
+      return;
+    }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      showToast('Obrázek je příliš velký (max 5 MB)', 'error');
+      return;
+    }
+    if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+      showToast('Maximum 5 příloh', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '');
+      const comma = dataUrl.indexOf(',');
+      if (comma < 0) {
+        showToast('Nepodařilo se načíst obrázek', 'error');
+        return;
+      }
+      pendingAttachments.push({
+        id: newCommandId(),
+        mimeType: file.type,
+        name: file.name || 'image',
+        data: dataUrl.slice(comma + 1),
+        previewUrl: dataUrl,
+      });
+      renderAttachments();
+    };
+    reader.onerror = () => showToast('Nepodařilo se načíst obrázek', 'error');
+    reader.readAsDataURL(file);
+  }
+
+  function handleImagePaste(e) {
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items || $input.disabled) return;
+    let handled = false;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          handled = true;
+          addImageFile(file);
+        }
+      }
+    }
+    return handled;
+  }
 
   $input.addEventListener('input', () => {
-    $input.style.height = 'auto';
-    $input.style.height = Math.min($input.scrollHeight, 120) + 'px';
-    $btnSend.disabled = !$input.value.trim();
+    autosizeMessageInput();
+    updateSendButton();
   });
+
+  $input.addEventListener('paste', (e) => {
+    handleImagePaste(e);
+  });
+
+  if ($inputWrapper) {
+    $inputWrapper.addEventListener('paste', (e) => {
+      if (e.target === $input) return;
+      handleImagePaste(e);
+    });
+  }
+
+  if ($btnAttach && $attachmentFileInput) {
+    $btnAttach.addEventListener('click', () => {
+      if ($btnAttach.disabled) return;
+      $attachmentFileInput.click();
+    });
+    $attachmentFileInput.addEventListener('change', () => {
+      const files = Array.from($attachmentFileInput.files || []);
+      files.forEach((file) => addImageFile(file));
+      $attachmentFileInput.value = '';
+    });
+  }
 
   // Send-on-Enter behaves differently per primary input device:
   //   - Touch (mobile): Enter = newline (textarea default), tap Send to send.
@@ -346,11 +667,23 @@
 
   function sendMessage() {
     const text = $input.value.trim();
-    if (!text) return;
-    socket.emit('command:send_message', { commandId: newCommandId(), text });
+    if (!text && pendingAttachments.length === 0) return;
+    const payload = {
+      commandId: newCommandId(),
+    };
+    if (text) payload.text = text;
+    if (pendingAttachments.length > 0) {
+      payload.attachments = pendingAttachments.map((att) => ({
+        mimeType: att.mimeType,
+        name: att.name,
+        data: att.data,
+      }));
+    }
+    socket.emit('command:send_message', payload);
     $input.value = '';
-    $input.style.height = 'auto';
-    $btnSend.disabled = true;
+    autosizeMessageInput({ allowShrink: true });
+    clearAttachments();
+    updateSendButton();
     showToast('Message sent', 'success');
   }
 
@@ -592,10 +925,12 @@
   // --- Message rendering ---
 
   function renderMessages() {
+    const selectionActive = hasActiveMessagesSelection();
+    const wasNearBottom = isNearMessagesBottom();
     if (state.messages.length === 0) {
       const ui = getConnectionUiState();
       $emptyState.style.display = '';
-      $messages.querySelectorAll('.chat-el').forEach(el => el.remove());
+      if (!selectionActive) $messages.querySelectorAll('.chat-el').forEach(el => el.remove());
       $emptyPrimary.textContent = ui.emptyPrimary;
       $emptyHint.innerHTML = ui.emptyHint;
       return;
@@ -618,6 +953,7 @@
 
       if (!el) {
         el = createElement(msg);
+        el.dataset.renderKey = messageRenderKey(msg);
         const allEls = $messages.querySelectorAll('.chat-el');
         if (index < allEls.length) {
           $messages.insertBefore(el, allEls[index]);
@@ -625,16 +961,46 @@
           $messages.appendChild(el);
         }
       } else if (el.dataset.msgType !== msg.type) {
+        if (selectionActive && selectionTouchesElement(el)) return;
         const replacement = createElement(msg);
+        replacement.dataset.renderKey = messageRenderKey(msg);
         el.replaceWith(replacement);
         el = replacement;
       } else {
+        const renderKey = messageRenderKey(msg);
+        if (el.dataset.renderKey === renderKey) return;
+        if (selectionActive && selectionTouchesElement(el)) return;
         updateElement(el, msg);
+        el.dataset.renderKey = renderKey;
       }
     });
 
-    if (!userScrolledUp) scheduleMessagesAutoScroll();
+    if (historyScrollPreserve && state.messages.length > historyScrollPreserve.beforeCount) {
+      restoreHistoryScrollPreserve(historyScrollPreserve);
+      historyScrollPreserve = null;
+    } else if (forceScrollToBottomOnce) {
+      forceScrollToBottomOnce = false;
+      if (!selectionActive) scheduleMessagesAutoScroll(true);
+    } else if (!userScrolledUp && !selectionActive) {
+      scheduleMessagesAutoScroll(wasNearBottom);
+    }
     checkMessagesForNotifications();
+  }
+
+  function selectionTouchesElement(el) {
+    const selection = window.getSelection ? window.getSelection() : null;
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
+    for (let i = 0; i < selection.rangeCount; i++) {
+      const range = selection.getRangeAt(i);
+      if (
+        el.contains(range.commonAncestorContainer) ||
+        el.contains(range.startContainer) ||
+        el.contains(range.endContainer)
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   function createElement(msg) {
@@ -652,6 +1018,14 @@
     }
     el.dataset.msgType = msg.type;
     return el;
+  }
+
+  function messageRenderKey(msg) {
+    try {
+      return JSON.stringify(msg);
+    } catch {
+      return '';
+    }
   }
 
   function updateElement(el, msg) {
@@ -858,13 +1232,36 @@
     return wrapper;
   }
 
-  function appendAssistantNativeBlocks(bubble, msg) {
-    if (!bubble) return;
-    bubble.querySelectorAll(':scope > .native-code-block').forEach((n) => n.remove());
-    if (!msg.codeBlocks?.length) return;
-    for (const item of msg.codeBlocks) {
-      if (!item || (!item.code?.trim() && !(item.diffLines && item.diffLines.length))) continue;
-      bubble.appendChild(createNativeBlockFromItem(item));
+  function isRenderableCodeBlockItem(item) {
+    return item && (item.code?.trim() || (item.diffLines && item.diffLines.length));
+  }
+
+  /** Insert native code blocks inline where Cursor had composer code blocks in markdown HTML. */
+  function embedAssistantNativeBlocks(content, msg) {
+    if (!content) return;
+    content.querySelectorAll('.native-code-block').forEach((n) => n.remove());
+    if (!msg.codeBlocks?.length) {
+      content.querySelectorAll('.native-code-block-slot').forEach((n) => n.remove());
+      return;
+    }
+
+    const slots = Array.from(content.querySelectorAll('.native-code-block-slot'));
+    const used = new Set();
+
+    for (const slot of slots) {
+      const idx = parseInt(slot.dataset.cbIndex || '-1', 10);
+      const item = Number.isFinite(idx) && idx >= 0 ? msg.codeBlocks[idx] : null;
+      if (!isRenderableCodeBlockItem(item)) {
+        slot.remove();
+        continue;
+      }
+      used.add(idx);
+      slot.replaceWith(createNativeBlockFromItem(item));
+    }
+
+    for (let i = 0; i < msg.codeBlocks.length; i++) {
+      if (used.has(i) || !isRenderableCodeBlockItem(msg.codeBlocks[i])) continue;
+      content.appendChild(createNativeBlockFromItem(msg.codeBlocks[i]));
     }
   }
 
@@ -881,22 +1278,21 @@
       content.className = 'assistant-content markdown-body';
       content.innerHTML = sanitizeHtml(msg.html);
       normalizeMarkdownCodeBlocks(content);
+      embedAssistantNativeBlocks(content, msg);
       bubble.appendChild(content);
     } else {
       const content = document.createElement('div');
       content.className = 'assistant-content';
       content.textContent = msg.text;
+      embedAssistantNativeBlocks(content, msg);
       bubble.appendChild(content);
     }
-
-    appendAssistantNativeBlocks(bubble, msg);
 
     el.appendChild(bubble);
     return el;
   }
 
   function updateAssistantEl(el, msg) {
-    const bubble = el.querySelector('.assistant-bubble');
     const content = el.querySelector('.assistant-content');
     if (!content) return;
     if (msg.html) {
@@ -907,7 +1303,7 @@
       content.textContent = msg.text;
       content.classList.remove('markdown-body');
     }
-    appendAssistantNativeBlocks(bubble, msg);
+    embedAssistantNativeBlocks(content, msg);
   }
 
   // --- Tool call ---
@@ -1537,9 +1933,16 @@
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
     tmp.querySelectorAll('script, iframe, object, embed, form').forEach(el => el.remove());
+    let cbSlot = 0;
     tmp
-      .querySelectorAll('.composer-message-codeblock, .composer-code-block-container, .ui-code-block')
-      .forEach((el) => el.remove());
+      .querySelectorAll('.composer-message-codeblock, .composer-code-block-container')
+      .forEach((el) => {
+        const slot = document.createElement('div');
+        slot.className = 'native-code-block-slot';
+        slot.dataset.cbIndex = String(cbSlot++);
+        el.replaceWith(slot);
+      });
+    tmp.querySelectorAll('.ui-code-block').forEach((el) => el.remove());
     tmp.querySelectorAll('*').forEach(el => {
       for (const attr of Array.from(el.attributes)) {
         if (attr.name.startsWith('on') || attr.name === 'srcdoc') {
@@ -1750,8 +2153,10 @@
   }
 
   function renderInputState() {
-    $input.disabled = !state.inputAvailable && !state.connected;
-    $btnSend.disabled = !$input.value.trim() || $input.disabled;
+    const enabled = state.inputAvailable || state.connected;
+    $input.disabled = !enabled;
+    if ($btnAttach) $btnAttach.disabled = !enabled;
+    updateSendButton();
   }
 
   function fireNotification(text, tag) {
@@ -1849,6 +2254,13 @@
   }
 
   function emitSwitchTab(tab) {
+    historyTopArmed = false;
+    historyLoading = false;
+    historyScrollPreserve = null;
+    forceScrollToBottomOnce = true;
+    historySuppressUntil = Date.now() + HISTORY_SUPPRESS_MS;
+    userScrolledUp = false;
+    setHistoryLoaderVisible(false);
     socket.emit('command:switch_tab', {
       commandId: newCommandId(),
       tabTitle: tab.title,

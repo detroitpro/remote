@@ -133,6 +133,7 @@ header {
 
 #messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 10px 12px;
@@ -140,8 +141,21 @@ header {
   flex-direction: column;
   gap: 4px;
   -webkit-overflow-scrolling: touch;
-  scroll-behavior: smooth;
+  overscroll-behavior: contain;
 }
+
+.history-loader {
+  align-self: center;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: rgba(228, 228, 228, 0.04);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.history-loader.hidden { display: none; }
 
 .empty-state {
   display: flex;
@@ -287,8 +301,13 @@ header {
   margin-top: 10px;
 }
 
+.assistant-content .native-code-block,
 .assistant-bubble .native-code-block {
   margin-top: 8px;
+}
+
+.native-code-block-slot {
+  display: none;
 }
 
 .assistant-bubble .overflow-auto,
@@ -637,8 +656,10 @@ header {
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 12px;
+  line-height: 1.35;
+  font-weight: 400;
   font-family: var(--font-mono);
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -663,15 +684,18 @@ header {
 }
 
 .tool-action {
-  font-weight: 500;
-  color: var(--text-secondary);
-  flex-shrink: 0;
+  font-weight: inherit;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .tool-details {
-  color: var(--text-tertiary);
+  color: inherit;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .tool-file-info {
@@ -704,10 +728,10 @@ header {
 .el-thought { padding: 0 0; }
 
 .thought-line.thought-line-summary {
-  font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   font-size: 12px;
-  letter-spacing: 0.02em;
+  font-weight: inherit;
+  line-height: inherit;
 }
 
 .thought-line.thought-line-step {
@@ -721,6 +745,8 @@ header {
 .thought-line {
   padding: 1px 8px;
   font-size: 12px;
+  line-height: 1.35;
+  font-weight: 400;
   color: var(--text-quaternary);
 }
 
@@ -1484,19 +1510,102 @@ header {
 
 .input-wrapper {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   background: var(--bg-input);
   border-radius: var(--radius);
-  padding: 4px 4px 4px 12px;
+  padding: 4px;
   border: 1px solid var(--border-color);
   transition: border-color 0.2s;
 }
 
 .input-wrapper:focus-within { border-color: rgba(228, 228, 228, 0.16); }
 
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding-left: 4px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.attachment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 4px 0;
+}
+
+.attachment-strip.hidden { display: none; }
+
+.attachment-chip {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+
+.attachment-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-attach {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-tertiary);
+  border-radius: 50%;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.btn-attach:hover:not(:disabled) { color: var(--text-secondary); background: var(--bg-hover); }
+.btn-attach:disabled { opacity: 0.35; }
+
 #message-input {
   flex: 1;
+  box-sizing: border-box;
   background: transparent;
   border: none;
   outline: none;
@@ -1505,8 +1614,10 @@ header {
   font-size: 14px;
   line-height: 1.4;
   resize: none;
+  overflow-y: hidden;
   max-height: 120px;
   padding: 6px 0;
+  min-width: 0;
 }
 
 #message-input::placeholder { color: var(--text-quaternary); }

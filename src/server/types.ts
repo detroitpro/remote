@@ -326,10 +326,20 @@ export interface SelectorConfig {
   [key: string]: SelectorStrategy;
 }
 
+export interface MessageAttachment {
+  mimeType: string;
+  /** Base64-encoded file bytes (no data: URL prefix). */
+  data: string;
+  name?: string;
+}
+
 export interface CommandPayload {
   commandId: string;
-  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'close_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model';
+  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'close_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model' | 'load_history';
+  /** Scroll steps in Cursor IDE when loading older chat history (load_history). */
+  times?: number;
   text?: string;
+  attachments?: MessageAttachment[];
   approvalId?: string;
   actionType?: string;
   selectorPath?: string;
@@ -361,6 +371,7 @@ export interface ServerConfig {
   webappPassword: string;
   windowTitleQualifier: boolean;
   dataDir: string;
+  cursorStateDbPath?: string;
   telegram: TelegramConfig;
 }
 

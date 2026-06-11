@@ -39,6 +39,12 @@
       "textarea"
     ]
   },
+  "composerFileInput": {
+    "strategies": [
+      ".composer-bar input[type='file']",
+      "#workbench\\.parts\\.auxiliarybar input[type='file']"
+    ]
+  },
   "agentStatus": {
     "strategies": [
       "span.auxiliary-bar-chat-title",
