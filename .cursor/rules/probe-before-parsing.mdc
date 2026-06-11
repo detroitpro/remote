@@ -1,0 +1,20 @@
+---
+description: Před parsováním Cursor DOM vždy probe živý stav přes CDP
+globs: src/server/dom-extractor.ts,src/server/command-executor.ts,selectors.json,scripts/probe*.ts
+alwaysApply: false
+---
+
+# Probe before parsing
+
+Nikdy nehádej selektory pro Cursor UI. Nejdřív ověř proti běžícímu workbench targetu (`type=page`, URL obsahuje `workbench`).
+
+## Jak probeovat
+
+1. `npm run probe` nebo `npx tsx scripts/probe-tabs.ts`
+2. Nový případ → krátký `scripts/probe-<téma>.ts` (vzor: `probe-tabs.ts`)
+3. V `callFunction`/`evaluate` vypiš: `class`, `data-*`, `aria-label`, `textContent` vzorky
+
+## Ověření chování příkazů
+
+- Syntetický `element.click()` v evaluate **často nefunguje** u VS Code/Cursor tabů — ověř, že se UI opravdu změnilo (aktivní tab, titulek).
+- Pro kliky v editor tab baru používej `CdpClient.clickAtCoords()` (nativní `Input.dispatchMouseEvent`).

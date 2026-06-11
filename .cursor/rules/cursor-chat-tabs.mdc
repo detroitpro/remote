@@ -1,0 +1,32 @@
+---
+description: Cursor DOM — chat záložky, sidebar agenti, stav práce, přepínání/zavírání
+globs: src/server/dom-extractor.ts,src/server/command-executor.ts,src/server/types.ts,src/client/app.js,selectors.json
+alwaysApply: false
+---
+
+# Chat tabs & sidebar agents
+
+## Dva zdroje záložek (`ChatTab.source`)
+
+| source | DOM | poznámka |
+|--------|-----|----------|
+| `open` | `.tabs-container .tab[aria-label*="Chat Editors"]` | `data-resource-name` = `composerId` |
+| `sidebar` | `.agent-sidebar-cell` (legacy) nebo glass `.glass-sidebar-agent-menu-btn` | titul v `.agent-sidebar-cell-text` / `.ui-sidebar-menu-button-label` |
+
+Skrýt navigaci (ne agenti): **Automations**, **Customize** — filtr v `dom-extractor.ts`.
+
+## Stav práce (`ChatTab.workStatus`)
+
+- `running`: `.spinning-loader` v `.agent-sidebar-cell-icon-default`, nebo `data-composer-status` ≠ idle/done na `[data-composer-id]`
+- `completed`: sidebar buňka s `data-has-subtitle="true"` bez spinneru
+- `idle`: ostatní
+
+Po extrakci synchronizuj `open` záložky ze sidebaru / composer statusu (`syncOpenTabWorkStatus`).
+
+## Příkazy (command-executor)
+
+- **`switchTab` (open)**: najdi tab podle `composerId` / titulku → `clickAtCoords` na **levou část** tabu (~35 % šířky), ne na close tlačítko. `selectorPath` z `buildSelectorPath` je křehký — preferuj `composerId` + `tabSource`.
+- **`closeTab` (open)**: klik na `.action-label.codicon-close` přes `clickAtCoords`.
+- **Sidebar**: title match + `.agent-sidebar-cell.click()` obvykle stačí.
+
+Web klient posílá `composerId`, `tabSource` v `command:switch_tab` / `command:close_tab`.

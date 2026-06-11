@@ -1,0 +1,53 @@
+---
+description: Spouštění, restart, ověření a běžné problémy při vývoji CursorRemote
+alwaysApply: true
+---
+
+# Dev workflow
+
+## Příkazy
+
+```bash
+npm run dev      # tsx watch přes scripts/dev-wrapper.ts — server na :3001
+npm test         # povinné před „hotovo“ (tsx --test tests/*.test.ts)
+npm run build    # tsc + kopie src/client → dist/client
+npm run probe    # scripts/probe-cdp.ts — základní CDP průzkum
+npx tsx scripts/probe-tabs.ts [--window <název>]
+```
+
+## Ověření změn
+
+1. **Server (TS)**: `npm test` + `npm run build`. `tsx watch` načte změny v `src/server/` automaticky.
+2. **Web klient** (`src/client/`): statické soubory — stačí **obnovit prohlížeč** na `http://localhost:3001`.
+3. **DOM extrakce / příkazy**: vyžaduje běžící Cursor s CDP (`cursorRemote.cdpUrl`, typicky `http://127.0.0.1:9222` nebo `19222`).
+
+## Vizuální kontrola v prohlížeči
+
+Po změnách web UI **otevři a zkontroluj sám** `http://localhost:3001` (browser automation / Simple Browser v IDE):
+
+- Ověř layout tab baru, stavové indikátory, bottom sheety, mobilní chování.
+- Ne spoléhat jen na `npm test` — unit testy web klienta nevidí CSS ani reálný socket stav.
+- Před otevřením musí běžet `npm run dev` a být připojený Cursor (aby UI mělo data).
+- Pokud je zapnutá ochrana hesla (`WEBAPP_PASSWORD` v `.env`), na `/login` zadej heslo z env — bez něj UI nenačteš.
+
+Pro interakci (klik na záložku, long-press menu) ověř i efekt v Cursoru — web UI je jen dálkové ovládání přes CDP.
+
+## Restart dev serveru
+
+Při `EADDRINUSE :3001` starý proces stále běží:
+
+```powershell
+netstat -ano | findstr :3001
+taskkill /PID <pid> /T /F
+npm run dev
+```
+
+## CDP / probe skripty
+
+- Piš probe logiku jako `scripts/probe-*.ts` a spouštěj přes `npx tsx scripts/...`.
+- **`npx tsx -e "..."` na Windows často visí** — nepoužívat pro CDP eval.
+- Před novými DOM heuristikami vždy probe proti živému Cursoru (viz `probe-before-parsing.mdc`).
+
+## Logy
+
+Dev server loguje do terminálu i `./temp/server.log`. U `switch_tab` / `close_tab` hledej `[command-executor]` — úspěch přes selector neznamená, že se UI v Cursoru opravdu změnilo.

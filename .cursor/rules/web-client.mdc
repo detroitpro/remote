@@ -1,0 +1,19 @@
+---
+description: Web klient — formátování, styly, minimální diff
+globs: src/client/**
+alwaysApply: false
+---
+
+# Web client (`src/client/`)
+
+- **Bez build stepu** — soubory se servírují přímo z `src/client/`.
+- **Single quotes**, legacy odsazení v `app.js` (tělo `bootstrap()` není extra odsazené).
+- **Nepouštěj Prettier** na `src/client/` — je v `.prettierignore`; workspace má `formatOnSave: false`.
+- Při úpravách `app.js`: **jen funkční diff**, neměň styl uvozovek ani celý soubor.
+
+## Tab bar UI
+
+- Skupiny **Aktivní** (`source: open`) a **Seznam** (`source: sidebar`).
+- Stav: `.tab-status.running` = šedý pomalu rotující kroužek (9s), `.completed` = zelená tečka.
+- Kontextové menu: dlouhý stisk / pravý klik → bottom sheet (`#sheet-tab`), zavření jen u `open` záložek.
+- Pro animace spinneru nepoužívat `color-mix` s rgba CSS proměnnými — může zmizet kontrast; použij `var(--text-quaternary)` / `var(--text-secondary)`.
