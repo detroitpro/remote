@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import type { CursorState, CursorWindow } from './types.js';
 import { AGENT_ACTIVITY_STALE_MS } from './activity-stale.js';
+import { filterActionableApprovals } from './approval-filter.js';
 
 function emptyState(): CursorState {
   return {
@@ -79,6 +80,10 @@ export class StateManager extends EventEmitter {
     newState.lastExtractionError = null;
     newState.windows = this.currentState.windows;
     newState.activeWindowId = this.currentState.activeWindowId;
+    newState.pendingApprovals = filterActionableApprovals(newState.pendingApprovals);
+    if (newState.pendingApprovals.length === 0 && newState.agentStatus === 'waiting_approval') {
+      newState.agentStatus = 'idle';
+    }
 
     const stateForApply = this.applyActivityStaleness(newState);
 

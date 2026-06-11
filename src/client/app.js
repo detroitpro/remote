@@ -217,6 +217,17 @@
   });
 
   socket.on('state:patch', (patch) => {
+    if (patch.pendingApprovals) {
+      patch.pendingApprovals = patch.pendingApprovals.filter(function (a) {
+        return !isBackgroundApproval(a);
+      });
+      if (
+        patch.pendingApprovals.length === 0 &&
+        patch.agentStatus === 'waiting_approval'
+      ) {
+        patch.agentStatus = 'idle';
+      }
+    }
     Object.assign(state, patch);
     renderAll();
   });
@@ -272,7 +283,7 @@
   $btnSend.addEventListener('click', sendMessage);
 
   $btnApprove.addEventListener('click', () => {
-    const approval = state.pendingApprovals[0];
+    const approval = firstActionableApproval();
     if (!approval) return;
     const action = approval.actions.find(a => a.type === 'approve' || a.type === 'approve_all');
     if (!action) return;
@@ -285,9 +296,11 @@
   });
 
   $btnReject.addEventListener('click', () => {
-    const approval = state.pendingApprovals[0];
+    const approval = firstActionableApproval();
     if (!approval) return;
-    const action = approval.actions.find(a => a.type === 'reject');
+    const action = approval.actions.find(function (a) {
+      return a.type === 'reject' && !isGarbageActionLabel(a.label);
+    });
     if (!action) return;
     socket.emit('command:reject', {
       commandId: newCommandId(),
@@ -1505,14 +1518,66 @@
 
   // --- Approvals ---
 
+  function isBackgroundApprovalLabel(label) {
+    const norm = (label || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!norm) return false;
+    if (norm.includes('background')) return true;
+    return /run\s+in\s+back(?:ground)?/.test(norm);
+  }
+
+  function looksLikeButtonLabel(label) {
+    const norm = (label || '').replace(/\s+/g, ' ').trim();
+    if (!norm || norm.length > 48) return false;
+    if (/[{}\[\];]/.test(norm)) return false;
+    if (/\/\/|\/\*|\*\//.test(norm)) return false;
+    if (/\b(function|const|let|var|catch|syncopen|chatTabs)\b/i.test(norm)) return false;
+    if (/^\+\s*\+/.test(norm)) return false;
+    return true;
+  }
+
+  function isBackgroundApproval(approval) {
+    if (!approval) return true;
+    if (isBackgroundApprovalLabel(approval.description)) return true;
+    const approves = approval.actions.filter(function (a) {
+      return a.type === 'approve' || a.type === 'approve_all';
+    });
+    if (approves.length === 0) return true;
+    if (approves.every(function (a) {
+      return isBackgroundApprovalLabel(a.label);
+    })) return true;
+    if (!approves.some(function (a) {
+      return looksLikeButtonLabel(a.label);
+    })) return true;
+    return false;
+  }
+
+  function isGarbageActionLabel(label) {
+    if (!looksLikeButtonLabel(label)) return true;
+    const norm = (label || '').replace(/\s+/g, ' ').trim();
+    if (/#\s*fail\b/i.test(norm)) return true;
+    if (/\bduration_ms\b/i.test(norm)) return true;
+    if (/#\s*(cancelled|skipped|todo)\s+\d+/i.test(norm)) return true;
+    return false;
+  }
+
+  function firstActionableApproval() {
+    for (let i = 0; i < state.pendingApprovals.length; i++) {
+      const approval = state.pendingApprovals[i];
+      if (!isBackgroundApproval(approval)) return approval;
+    }
+    return null;
+  }
+
   function renderApprovals() {
-    if (state.pendingApprovals.length > 0) {
+    const approval = firstActionableApproval();
+    if (approval) {
       $approvalBar.classList.remove('hidden');
-      const approval = state.pendingApprovals[0];
       $approvalDesc.textContent = approval.description || 'Action needs approval';
 
       const approveAction = approval.actions.find(a => a.type === 'approve' || a.type === 'approve_all');
-      const rejectAction = approval.actions.find(a => a.type === 'reject');
+      const rejectAction = approval.actions.find(function (a) {
+        return a.type === 'reject' && !isGarbageActionLabel(a.label);
+      });
 
       $btnApprove.disabled = !approveAction;
       $btnReject.disabled = !rejectAction;
@@ -1616,10 +1681,20 @@
       var text = null;
 
       if (msg.type === 'run_command' && msg.actions && msg.actions.length > 0) {
-        text = (msg.description || 'Run command') + ': ' + (msg.command || '').substring(0, 80);
+        const needsAction = msg.actions.some(function (a) {
+          return a.type === 'run' && !(a.label || '').toLowerCase().includes('background');
+        });
+        if (needsAction) {
+          text = (msg.description || 'Run command') + ': ' + (msg.command || '').substring(0, 80);
+        }
       } else if (msg.type === 'tool' && msg.actions && msg.actions.length > 0) {
-        var detail = msg.details || msg.filename || '';
-        text = (msg.action || 'Tool') + (detail ? ' ' + detail : '') + ' needs approval';
+        const needsAction = msg.actions.some(function (a) {
+          return (a.type === 'run' || a.type === 'allow') && !(a.label || '').toLowerCase().includes('background');
+        });
+        if (needsAction) {
+          var detail = msg.details || msg.filename || '';
+          text = (msg.action || 'Tool') + (detail ? ' ' + detail : '') + ' needs approval';
+        }
       }
 
       if (text) {

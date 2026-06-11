@@ -21,6 +21,14 @@ export function cleanTabTitle(raw: string): string {
   return t.trim().substring(0, 120);
 }
 
+export {
+  filterActionableApprovals,
+  isActionableApproval,
+  isBackgroundApprovalLabel,
+  isGarbageActionLabel,
+  looksLikeButtonLabel,
+} from './approval-filter.js';
+
 /**
  * Runs inside Cursor's renderer process via Runtime.evaluate.
  * Must be completely self-contained (no Node.js imports).
@@ -460,6 +468,72 @@ export function extractionFunction(
       return extractCodeBlockItem(block);
     }
 
+    function isBackgroundApprovalLabel(label: string): boolean {
+      const norm = label.replace(/\s+/g, ' ').trim().toLowerCase();
+      if (!norm) return false;
+      if (norm.includes('background')) return true;
+      return /run\s+in\s+back(?:ground)?/.test(norm);
+    }
+
+    function looksLikeButtonLabel(label: string): boolean {
+      const norm = label.replace(/\s+/g, ' ').trim();
+      if (!norm || norm.length > 48) return false;
+      if (/[{}\[\];]/.test(norm)) return false;
+      if (/\/\/|\/\*|\*\//.test(norm)) return false;
+      if (/\b(function|const|let|var|catch|syncopen|chatTabs)\b/i.test(norm)) return false;
+      if (/^\+\s*\+/.test(norm)) return false;
+      return true;
+    }
+
+    function isGarbageActionLabel(label: string): boolean {
+      if (!looksLikeButtonLabel(label)) return true;
+      const norm = label.replace(/\s+/g, ' ').trim();
+      if (/#\s*fail\b/i.test(norm)) return true;
+      if (/\bduration_ms\b/i.test(norm)) return true;
+      if (/#\s*(cancelled|skipped|todo)\s+\d+/i.test(norm)) return true;
+      return false;
+    }
+
+    function getButtonLabel(btn: Element): string {
+      const clean = (raw: string): string =>
+        raw.replace(/\s*(Shift\+)?⏎\s*/g, '').replace(/\s+/g, ' ').trim();
+
+      const aria = btn.getAttribute('aria-label')?.trim();
+      if (aria && looksLikeButtonLabel(aria)) return clean(aria);
+
+      let shallow = '';
+      for (const child of Array.from(btn.childNodes)) {
+        if (child.nodeType === Node.TEXT_NODE) shallow += child.textContent || '';
+        else if (child instanceof Element) {
+          const tag = child.tagName;
+          if (tag === 'SPAN' || tag === 'DIV') shallow += child.textContent || '';
+        }
+      }
+      shallow = clean(shallow);
+      if (shallow && looksLikeButtonLabel(shallow)) return shallow;
+
+      const title = btn.getAttribute('title')?.trim();
+      if (title && looksLikeButtonLabel(title)) return clean(title);
+
+      const full = clean(btn.textContent || '');
+      if (full && looksLikeButtonLabel(full)) return full;
+      return '';
+    }
+
+    function isActionableApproval(entry: {
+      description: string;
+      actions: { label: string; type: string }[];
+    }): boolean {
+      const approves = entry.actions.filter(
+        (a) => a.type === 'approve' || a.type === 'approve_all'
+      );
+      if (approves.length === 0) return false;
+      if (isBackgroundApprovalLabel(entry.description)) return false;
+      if (approves.every((a) => isBackgroundApprovalLabel(a.label))) return false;
+      if (!approves.some((a) => looksLikeButtonLabel(a.label))) return false;
+      return true;
+    }
+
     function extractToolActions(
       container: Element
     ): { label: string; type: 'run' | 'skip' | 'allow'; selectorPath: string }[] {
@@ -479,6 +553,7 @@ export function extractionFunction(
         if (seenPaths.has(path)) continue;
         seenPaths.add(path);
         const btnText = (btn.textContent || '').replace(/[⏎⌘⇧]/g, '').trim();
+        if (isBackgroundApprovalLabel(btnText)) continue;
         const isAllow =
           btn.classList.contains('anysphere-secondary-button') || btnText.toLowerCase().includes('allow');
         if (isAllow) {
@@ -1180,10 +1255,15 @@ export function extractionFunction(
 
       const actions: CursorState['pendingApprovals'][0]['actions'] = [];
 
+      const cardText = (card.textContent || '').replace(/\s+/g, ' ').trim();
+      if (isBackgroundApprovalLabel(cardText)) continue;
+
       const runBtn = row.querySelector('button.ui-shell-tool-call__run-btn');
       if (runBtn && !isMenuTrigger(runBtn)) {
+        const runLabel = cleanBtnLabel(getButtonLabel(runBtn));
+        if (!runLabel || isBackgroundApprovalLabel(runLabel) || !looksLikeButtonLabel(runLabel)) continue;
         actions.push({
-          label: cleanBtnLabel(runBtn.textContent || '') || 'Run',
+          label: runLabel,
           type: 'approve',
           selectorPath: buildSelectorPath(runBtn),
         });
@@ -1199,11 +1279,14 @@ export function extractionFunction(
       }
       const skipBtn = row.querySelector('button.ui-shell-tool-call__skip-btn');
       if (skipBtn && !isMenuTrigger(skipBtn)) {
-        actions.push({
-          label: cleanBtnLabel(skipBtn.textContent || '') || 'Skip',
-          type: 'reject',
-          selectorPath: buildSelectorPath(skipBtn),
-        });
+        const skipLabel = cleanBtnLabel(getButtonLabel(skipBtn)) || 'Skip';
+        if (!isGarbageActionLabel(skipLabel)) {
+          actions.push({
+            label: skipLabel,
+            type: 'reject',
+            selectorPath: buildSelectorPath(skipBtn),
+          });
+        }
       }
 
       if (!actions.some((a) => a.type === 'approve')) continue;
@@ -1218,6 +1301,7 @@ export function extractionFunction(
       const descEl = card.querySelector('.ui-shell-tool-call__description');
       const descText = (descEl?.textContent || '').trim().substring(0, 200);
       const description = cmdText || descText || 'Pending approval';
+      if (isBackgroundApprovalLabel(description)) continue;
 
       // Stable per-card id — Cursor's tool-call id when available, falling
       // back to selector path. Keeps the entry consistent across polls.
@@ -1241,8 +1325,12 @@ export function extractionFunction(
           const btns = container.querySelectorAll(sel);
           for (const btn of Array.from(btns)) {
             if (seenApproveBtns.has(btn) || isMenuTrigger(btn)) continue;
-            const label = btn.textContent?.trim() || btn.getAttribute('aria-label') || '';
-            if (label) {
+            const label = getButtonLabel(btn);
+            if (
+              label &&
+              !isBackgroundApprovalLabel(label) &&
+              looksLikeButtonLabel(label)
+            ) {
               seenApproveBtns.add(btn);
               approveButtons.push({ label, selector: buildSelectorPath(btn) });
             }
@@ -1252,11 +1340,20 @@ export function extractionFunction(
       if (approveButtons.length === 0 && approveTextMatch.length > 0) {
         for (const btn of Array.from(container.querySelectorAll('button'))) {
           if (seenApproveBtns.has(btn) || isMenuTrigger(btn)) continue;
-          const text = `${btn.textContent?.trim() || ''} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
+          const text = `${getButtonLabel(btn)} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
+          if (isBackgroundApprovalLabel(text)) continue;
           for (const pat of approveTextMatch) {
             if (text.includes(pat.toLowerCase())) {
+              const label = getButtonLabel(btn) || pat;
+              if (
+                isBackgroundApprovalLabel(label) ||
+                isBackgroundApprovalLabel(text) ||
+                !looksLikeButtonLabel(label)
+              ) {
+                break;
+              }
               seenApproveBtns.add(btn);
-              approveButtons.push({ label: btn.textContent?.trim() || pat, selector: buildSelectorPath(btn) });
+              approveButtons.push({ label, selector: buildSelectorPath(btn) });
               break;
             }
           }
@@ -1268,8 +1365,8 @@ export function extractionFunction(
           const btns = container.querySelectorAll(sel);
           for (const btn of Array.from(btns)) {
             if (seenRejectBtns.has(btn) || isMenuTrigger(btn)) continue;
-            const label = btn.textContent?.trim() || btn.getAttribute('aria-label') || '';
-            if (label) {
+            const label = getButtonLabel(btn);
+            if (label && !isGarbageActionLabel(label)) {
               seenRejectBtns.add(btn);
               rejectButtons.push({ label, selector: buildSelectorPath(btn) });
             }
@@ -1279,18 +1376,20 @@ export function extractionFunction(
       if (rejectButtons.length === 0 && rejectTextMatch.length > 0) {
         for (const btn of Array.from(container.querySelectorAll('button'))) {
           if (seenRejectBtns.has(btn) || isMenuTrigger(btn)) continue;
-          const text = `${btn.textContent?.trim() || ''} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
+          const text = `${getButtonLabel(btn)} ${btn.getAttribute('aria-label') || ''}`.toLowerCase();
           for (const pat of rejectTextMatch) {
             if (text.includes(pat.toLowerCase())) {
+              const label = getButtonLabel(btn) || pat;
+              if (isGarbageActionLabel(label)) break;
               seenRejectBtns.add(btn);
-              rejectButtons.push({ label: btn.textContent?.trim() || pat, selector: buildSelectorPath(btn) });
+              rejectButtons.push({ label, selector: buildSelectorPath(btn) });
               break;
             }
           }
         }
       }
 
-      if (approveButtons.length > 0 || rejectButtons.length > 0) {
+      if (approveButtons.length > 0) {
         const actions: CursorState['pendingApprovals'][0]['actions'] = [];
         for (const btn of approveButtons) {
           actions.push({
@@ -1311,6 +1410,8 @@ export function extractionFunction(
       }
     }
 
+    const actionableApprovals = pendingApprovals.filter((entry) => isActionableApproval(entry));
+
     // --- Agent status ---
     const statusEl = findFirst(statusSelectors);
     let agentStatus: CursorState['agentStatus'] = 'idle';
@@ -1322,7 +1423,7 @@ export function extractionFunction(
       else if (combined.includes('approv') || combined.includes('wait')) agentStatus = 'waiting_approval';
       else if (combined.includes('error') || combined.includes('fail')) agentStatus = 'error';
     }
-    if (pendingApprovals.length > 0) agentStatus = 'waiting_approval';
+    if (actionableApprovals.length > 0) agentStatus = 'waiting_approval';
 
     // Element-based status detection removed: tool loading badges and
     // run_command elements persist in the DOM long after completion.
@@ -1747,7 +1848,7 @@ export function extractionFunction(
       agentActivityLive: false,
       agentActivitySource: 'none',
       messages: elements,
-      pendingApprovals,
+      pendingApprovals: actionableApprovals,
       inputAvailable: inputEl !== null,
       chatTabs,
       activeComposerId: containerComposerId || (chatTabs.find((t) => t.isActive)?.composerId ?? ''),
