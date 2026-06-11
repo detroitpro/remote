@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 import type { BackgroundTask, ComposerQueueItem, PlanBlock } from '../../server/types.js';
 
-export type SheetType = 'mode' | 'model' | 'plan-model' | 'tab' | 'queue' | 'background-tasks' | null;
+export type SheetType = 'mode' | 'model' | 'plan-model' | 'tab' | 'queue' | 'background-tasks' | 'debug' | null;
 
 export interface ToastMessage {
   id: string;

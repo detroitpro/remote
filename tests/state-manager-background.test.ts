@@ -26,6 +26,7 @@ function baseState(overrides: Partial<CursorState> = {}): CursorState {
     composerQueue: { items: [] },
     questionnaire: null,
     backgroundTasks: [],
+    gitStatus: null,
     agentStopSelectorPath: '',
     ...overrides,
   };

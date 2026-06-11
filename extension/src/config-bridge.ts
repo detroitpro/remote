@@ -1,10 +1,15 @@
 import * as vscode from 'vscode';
+import { existsSync } from 'fs';
+import { join } from 'path';
 
 export function buildEnvFromConfig(
   context: vscode.ExtensionContext,
   licenseKey: string | undefined
 ): Record<string, string> {
   const config = vscode.workspace.getConfiguration('cursorRemote');
+  const clientSrcDir = context.extensionMode === vscode.ExtensionMode.Development
+    ? join(context.extensionPath, 'src', 'client')
+    : '';
   return {
     CDP_URL: config.get<string>('cdpUrl', 'http://127.0.0.1:9222'),
     SERVER_PORT: String(config.get<number>('serverPort', 3000)),
@@ -20,6 +25,8 @@ export function buildEnvFromConfig(
     TELEGRAM_IMPL: config.get<string>('telegram.impl', 'grammy'),
     LICENSE_KEY: licenseKey ?? '',
     DATA_DIR: context.globalStorageUri.fsPath,
+    PACKAGE_ROOT: context.extensionPath,
     LOG_FORMAT: 'json',
+    ...(clientSrcDir && existsSync(clientSrcDir) ? { CLIENT_SRC_DIR: clientSrcDir } : {}),
   };
 }

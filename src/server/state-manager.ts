@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import type { ChatElement, CursorState, CursorWindow } from './types.js';
+import type { GitStatusInfo } from '../shared/extension-bridge.js';
 import { AGENT_ACTIVITY_STALE_MS } from './activity-stale.js';
 import { filterActionableApprovals } from './approval-filter.js';
 import { mergeMessages } from './message-history.js';
@@ -27,6 +28,7 @@ function emptyState(): CursorState {
     composerQueue: { items: [] },
     questionnaire: null,
     backgroundTasks: [],
+    gitStatus: null,
     agentStopSelectorPath: '',
   };
 }
@@ -107,6 +109,7 @@ export class StateManager extends EventEmitter {
     newState.lastExtractionError = null;
     newState.windows = this.currentState.windows;
     newState.activeWindowId = this.currentState.activeWindowId;
+    newState.gitStatus = this.currentState.gitStatus;
     newState.pendingApprovals = filterActionableApprovals(newState.pendingApprovals);
     if (newState.pendingApprovals.length === 0 && newState.agentStatus === 'waiting_approval') {
       newState.agentStatus = 'idle';
@@ -277,6 +280,12 @@ export class StateManager extends EventEmitter {
     this.emit('state:patch', patch);
   }
 
+  updateGitStatus(gitStatus: GitStatusInfo | null): void {
+    if (JSON.stringify(this.currentState.gitStatus) === JSON.stringify(gitStatus)) return;
+    this.currentState = { ...this.currentState, gitStatus };
+    this.emit('state:patch', { gitStatus });
+  }
+
   private diff(
     prev: CursorState,
     next: CursorState
@@ -381,6 +390,11 @@ export class StateManager extends EventEmitter {
 
     if (JSON.stringify(prev.backgroundTasks) !== JSON.stringify(next.backgroundTasks)) {
       patch.backgroundTasks = next.backgroundTasks;
+      hasChange = true;
+    }
+
+    if (JSON.stringify(prev.gitStatus) !== JSON.stringify(next.gitStatus)) {
+      patch.gitStatus = next.gitStatus;
       hasChange = true;
     }
 

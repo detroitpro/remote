@@ -271,6 +271,23 @@ Plain text in any topic is sent as a prompt to the mapped Cursor agent.
 | `npm start` | Run compiled server |
 | `npm run discover` | DOM discovery tool |
 
+## Extension Dev Loop
+
+For extension work, use a dedicated Extension Development Host instead of reinstalling a `.vsix` after each change:
+
+1. Open `.vscode/cursor-remote-dev.code-workspace`.
+2. Run the `CursorRemote: watch extension` task.
+3. Start the `CursorRemote: Extension Dev Host` launch config (`F5` in Cursor / VS Code).
+4. Run the `CursorRemote: dev server` task only when you explicitly want the standalone web app on `:3001`.
+
+**Important:** Use **F5** — do not open the dev workspace in a normal Cursor window. A normal window runs the **installed** extension from `~/.cursor/extensions/cursor-remote.*` (old bundle, wrong port fights). In logs you want `Starting server (development): R:\...\cursor-ide-remote\dist\server\bundle.mjs`, not a path under `.cursor\extensions\`.
+
+In the **main** Cursor window, stop CursorRemote server or disable the installed `-local` extension while developing — both windows share port `3002` if configured globally.
+
+The dev workspace uses `serverPort = 3002` and points CDP at the same Cursor process (`http://127.0.0.1:19222` if your shortcut uses that port). CDP is per Cursor process, not per window — `--remote-debugging-port` in `launch.json` does not open a second CDP endpoint for the Extension Development Host. Your main Cursor shortcut must already include `--remote-debugging-port=19222` (or whatever port you set in `cursorRemote.cdpUrl`).
+
+In Extension Development Host, the server serves the **live React client** from `src/client/` via Vite (`CLIENT_SRC_DIR`). After UI changes you only need a browser refresh — no `npm run build` unless you test the packaged `dist/client` bundle. Keep `watch:ext` running so `dist/server/bundle.mjs` and the extension stay current.
+
 ## Documentation
 
 - [Setup Guide](docs/setup-guide.md) -- installation, networking, Telegram, troubleshooting

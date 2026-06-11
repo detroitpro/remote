@@ -20,6 +20,7 @@ import { useNotifications } from '../hooks/useNotifications.js';
 import { CommandClientContext, useCommandClient, useCreateCommandClient } from '../state/commandClient.js';
 import { defaultCursorState, mergeCursorPatch, RemoteStateContext } from '../state/remoteStateStore.js';
 import { checkAuth, clearAuthToken, createSocket, type SocketLike } from '../state/socketClient.js';
+import { fetchDebugInfo, useServerHealth, type HealthSnapshot } from '../state/serverHealth.js';
 import { UiStateContext, type SheetType, type ToastMessage } from '../state/uiState.js';
 import { newCommandId } from '../utils/commandIds.js';
 import { plainTextToHtml, sanitizeHtml } from '../utils/sanitizeHtml.js';
@@ -64,6 +65,10 @@ function commandResultData<T>(result: CommandResult): T | null {
 
 function getVisibleBackgroundTasks(state: CursorState): BackgroundTask[] {
   return (state.backgroundTasks || []).filter(task => !!task.stopSelectorPath);
+}
+
+function getVisibleGitStatus(state: CursorState) {
+  return state.gitStatus?.available ? state.gitStatus : null;
 }
 
 export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
@@ -192,25 +197,26 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
     <RemoteStateContext.Provider value={remoteState}>
       <CommandClientContext.Provider value={commandClient}>
         <UiStateContext.Provider value={ui}>
-          <CursorRemoteShell state={remoteState} socketConnected={socketConnected} />
+          <CursorRemoteShell state={remoteState} socketConnected={socketConnected} authReady={authReady} />
         </UiStateContext.Provider>
       </CommandClientContext.Provider>
     </RemoteStateContext.Provider>
   );
 }
 
-function CursorRemoteShell({ state, socketConnected }: { state: CursorState; socketConnected: boolean }) {
+function CursorRemoteShell({ state, socketConnected, authReady }: { state: CursorState; socketConnected: boolean; authReady: boolean }) {
+  const serverHealth = useServerHealth(authReady);
   return (
     <>
-      <HeaderStatus state={state} socketConnected={socketConnected} />
+      <HeaderStatus state={state} socketConnected={socketConnected} serverHealth={serverHealth} />
       <ComposerQueueBar queue={state.composerQueue?.items || []} queueLabel={state.composerQueue?.queueLabel} />
       <WindowBar windows={state.windows || []} activeWindowId={state.activeWindowId} />
       <TabBar tabs={state.chatTabs || []} />
       <MessageViewport state={state} />
       <ApprovalBar approvals={state.pendingApprovals || []} />
       <QuestionnaireBar state={state} />
-      <ComposerInput state={state} />
-      <BottomSheetHost state={state} />
+      <ComposerInput state={state} serverHealth={serverHealth} />
+      <BottomSheetHost state={state} serverHealth={serverHealth} socketConnected={socketConnected} />
       <PlanModal />
       <ToastHost />
     </>
@@ -251,7 +257,8 @@ function getConnectionUiState(state: CursorState, socketConnected: boolean) {
   };
 }
 
-function HeaderStatus({ state, socketConnected }: { state: CursorState; socketConnected: boolean }) {
+function HeaderStatus({ state, socketConnected, serverHealth }: { state: CursorState; socketConnected: boolean; serverHealth: HealthSnapshot | null }) {
+  const ui = React.useContext(UiStateContext)!;
   const command = useCommandClient();
   const connection = getConnectionUiState(state, socketConnected);
   const labels: Record<string, string> = {
@@ -282,6 +289,17 @@ function HeaderStatus({ state, socketConnected }: { state: CursorState; socketCo
       <div className="header-left">
         <span id="connection-dot" className={`dot ${connection.status}`} />
         <span id="connection-text">{connection.label}</span>
+        {serverHealth?.server && (
+          <button
+            id="server-version-badge"
+            type="button"
+            className="server-version-badge"
+            title="Open server debug panel"
+            onClick={() => ui.openSheet('debug')}
+          >
+            v{serverHealth.server.version}:{serverHealth.server.port}
+          </button>
+        )}
       </div>
       <div className={headerRightClass}>
         <span id="agent-status-icon">{state.agentStatus === 'waiting_approval' ? '!' : state.agentStatus === 'error' ? 'x' : ''}</span>
@@ -930,7 +948,7 @@ interface PendingAttachment {
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
 
-function ComposerInput({ state }: { state: CursorState }) {
+function ComposerInput({ state, serverHealth }: { state: CursorState; serverHealth: HealthSnapshot | null }) {
   const command = useCommandClient();
   const ui = React.useContext(UiStateContext)!;
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -942,6 +960,7 @@ function ComposerInput({ state }: { state: CursorState }) {
   const canSend = !inputDisabled && (text.trim().length > 0 || attachments.length > 0);
   const currentMode = modeUi(state.mode?.current);
   const backgroundTasks = getVisibleBackgroundTasks(state);
+  const gitStatus = getVisibleGitStatus(state);
 
   const clearAttachments = useCallback(() => {
     setAttachments([]);
@@ -1016,6 +1035,14 @@ function ComposerInput({ state }: { state: CursorState }) {
     }
   }, [addImageFile, inputDisabled]);
 
+  const openSourceControl = useCallback(async () => {
+    if (!gitStatus) return;
+    const result = await command.sendCommandAwaitResult('command:open_source_control');
+    if (!result.ok) {
+      ui.showToast(result.error || 'Failed to open Source Control', 'error');
+    }
+  }, [command, gitStatus, ui]);
+
   return (
     <footer id="input-bar">
       <div id="mode-model-bar" className="mode-model-bar">
@@ -1028,6 +1055,17 @@ function ComposerInput({ state }: { state: CursorState }) {
           <span id="pill-model-text">{state.model?.current || 'Auto'}</span>
           <span className="pill-chevron">&#9662;</span>
         </button>
+        {gitStatus && (
+          <button
+            id="pill-git-status"
+            className="git-status-pill"
+            type="button"
+            aria-label={`Open Source Control (${gitStatus.changedCount} changed file${gitStatus.changedCount === 1 ? '' : 's'})`}
+            onClick={() => void openSourceControl()}
+          >
+            F:{gitStatus.changedCount}
+          </button>
+        )}
         {backgroundTasks.length > 0 && (
           <button
             id="pill-background-tasks"
@@ -1039,6 +1077,16 @@ function ComposerInput({ state }: { state: CursorState }) {
             B:{backgroundTasks.length}
           </button>
         )}
+        <button
+          id="pill-debug"
+          className="debug-pill"
+          type="button"
+          aria-label="Open server debug panel"
+          title={serverHealth?.server ? `Server ${serverHealth.server.instanceId}` : 'Server debug'}
+          onClick={() => ui.openSheet('debug')}
+        >
+          Dbg
+        </button>
       </div>
       <div className="input-wrapper" onPaste={handlePaste}>
         <AttachmentStrip attachments={attachments} onRemove={id => setAttachments(items => items.filter(item => item.id !== id))} />
@@ -1118,7 +1166,7 @@ function AttachmentStrip({ attachments, onRemove }: { attachments: PendingAttach
   );
 }
 
-function BottomSheetHost({ state }: { state: CursorState }) {
+function BottomSheetHost({ state, serverHealth, socketConnected }: { state: CursorState; serverHealth: HealthSnapshot | null; socketConnected: boolean }) {
   const ui = React.useContext(UiStateContext)!;
   const active = ui.activeSheet;
   return (
@@ -1130,6 +1178,12 @@ function BottomSheetHost({ state }: { state: CursorState }) {
       <TabActionsSheet state={state} visible={active === 'tab'} />
       <QueueActionsSheet visible={active === 'queue'} />
       <BackgroundTasksSheet state={state} visible={active === 'background-tasks'} />
+      <DebugSheet
+        visible={active === 'debug'}
+        state={state}
+        serverHealth={serverHealth}
+        socketConnected={socketConnected}
+      />
     </>
   );
 }
@@ -1365,6 +1419,108 @@ function BackgroundTasksSheet({ state, visible }: { state: CursorState; visible:
             ) : (
               <span className="background-task-no-action">No stop</span>
             )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DebugSheet({
+  visible,
+  state,
+  serverHealth,
+  socketConnected,
+}: {
+  visible: boolean;
+  state: CursorState;
+  serverHealth: HealthSnapshot | null;
+  socketConnected: boolean;
+}) {
+  const ui = React.useContext(UiStateContext)!;
+  const [details, setDetails] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const loadDetails = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const data = await fetchDebugInfo() as Record<string, unknown>;
+      setDetails(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    void loadDetails();
+  }, [visible, loadDetails]);
+
+  const rows = useMemo(() => {
+    const bridge = details?.extensionBridge as Record<string, unknown> | undefined;
+    const bridgeDebug = bridge?.gitBridgeDebug as Record<string, unknown> | undefined;
+    const server = (details?.server ?? serverHealth?.server) as Record<string, unknown> | undefined;
+    return [
+      ['Client URL', window.location.origin],
+      ['Socket', socketConnected ? 'connected' : 'disconnected'],
+      ['Server version', server?.version ?? '—'],
+      ['Server port', server?.port ?? '—'],
+      ['Instance ID', server?.instanceId ?? '—'],
+      ['PID', server?.pid ?? '—'],
+      ['Data dir', server?.dataDirName ?? bridge?.dataDirName ?? '—'],
+      ['Client build', server?.clientBuild ?? '—'],
+      ['CDP URL', details?.cdpUrl ?? '—'],
+      ['State gitStatus', state.gitStatus ? `F:${state.gitStatus.changedCount}` : 'null'],
+      ['Bridge git file', bridge?.gitStatusFileExists ? 'yes' : 'no'],
+      ['Bridge git raw', bridge?.gitStatusRaw ?? '—'],
+      ['Git bridge window', bridgeDebug?.windowName ?? '—'],
+      ['Git bridge owner', bridgeDebug?.isOwner == null ? '—' : String(bridgeDebug.isOwner)],
+      ['Git bridge repos', bridgeDebug?.repoCount ?? '—'],
+      ['Git bridge resolved', bridgeDebug?.repoResolved == null ? '—' : String(bridgeDebug.repoResolved)],
+      ['Git bridge count', bridgeDebug?.changedCount ?? '—'],
+      ['Git bridge error', bridgeDebug?.lastError ?? '—'],
+      ['Generation', details?.generation ?? serverHealth?.generation ?? '—'],
+      ['Uptime', details?.uptime ?? serverHealth?.uptime ?? '—'],
+    ] as const;
+  }, [details, serverHealth, socketConnected, state.gitStatus]);
+
+  const copyJson = useCallback(async () => {
+    const payload = details ?? {
+      client: { url: window.location.origin, socketConnected },
+      health: serverHealth,
+      stateGitStatus: state.gitStatus,
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      ui.showToast('Debug JSON copied', 'success');
+    } catch {
+      ui.showToast('Copy failed', 'error');
+    }
+  }, [details, serverHealth, socketConnected, state.gitStatus, ui]);
+
+  return (
+    <div id="sheet-debug" className={`bottom-sheet debug-sheet ${visible ? '' : 'hidden'}`}>
+      <div className="sheet-header debug-sheet-header">
+        <span>Debug</span>
+        <div className="debug-sheet-actions">
+          <button type="button" className="debug-action-btn" disabled={loading} onClick={() => void loadDetails()}>
+            {loading ? 'Loading…' : 'Refresh'}
+          </button>
+          <button type="button" className="debug-action-btn" onClick={() => void copyJson()}>
+            Copy JSON
+          </button>
+        </div>
+      </div>
+      {error && <div className="debug-error">{error}</div>}
+      <div className="debug-sheet-body">
+        {rows.map(([label, value]) => (
+          <div key={label} className="debug-row">
+            <span className="debug-row-label">{label}</span>
+            <span className="debug-row-value">{String(value)}</span>
           </div>
         ))}
       </div>

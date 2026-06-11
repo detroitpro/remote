@@ -27,6 +27,7 @@ async function main() {
     format: 'esm',
     entryPoints: ['src/server/index.ts'],
     outfile: 'dist/server/bundle.mjs',
+    external: ['vite', '@vitejs/plugin-react'],
     banner: { js: [
       "import { createRequire as __cr } from 'module';",
       "import { fileURLToPath as __fu } from 'url';",

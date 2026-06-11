@@ -23,6 +23,7 @@ export const defaultCursorState: CursorState = {
   composerQueue: { items: [] },
   questionnaire: null,
   backgroundTasks: [],
+  gitStatus: null,
   agentStopSelectorPath: '',
 };
 

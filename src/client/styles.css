@@ -2040,6 +2040,7 @@ header {
   line-height: 1;
 }
 
+.git-status-pill,
 .background-task-pill {
   margin-left: auto;
   border: 1px solid var(--border-color);
@@ -2056,9 +2057,100 @@ header {
   touch-action: manipulation;
 }
 
-.background-task-pill:active {
+.background-task-pill {
+  margin-left: 0;
+}
+
+.git-status-pill:active,
+.background-task-pill:active,
+.debug-pill:active {
   background: var(--bg-hover);
   color: var(--text-secondary);
+}
+
+.debug-pill {
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 7px;
+  min-height: 20px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.server-version-badge {
+  margin-left: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.server-version-badge:active {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.debug-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.debug-sheet-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.debug-action-btn {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.debug-sheet-body {
+  max-height: 52vh;
+  overflow: auto;
+  padding: 0 16px 16px;
+}
+
+.debug-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  font-size: 12px;
+}
+
+.debug-row-label {
+  color: var(--text-tertiary);
+}
+
+.debug-row-value {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+.debug-error {
+  color: var(--accent-red);
+  font-size: 12px;
+  padding: 0 16px 8px;
 }
 
 .background-task-sheet-item {

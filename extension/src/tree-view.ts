@@ -105,6 +105,15 @@ export class StatusTreeView implements vscode.TreeDataProvider<TreeItem> {
     }
 
     if (health) {
+      if (health.server) {
+        const serverInfoItem = new vscode.TreeItem(
+          `Server v${health.server.version} :${health.server.port}`
+        );
+        serverInfoItem.iconPath = new vscode.ThemeIcon('versions');
+        serverInfoItem.description = `${health.server.instanceId} · ${health.server.clientBuild}`;
+        items.push(serverInfoItem);
+      }
+
       const cdpItem = new vscode.TreeItem(
         `CDP: ${health.connected ? 'Connected' : 'Disconnected'}`
       );
@@ -126,6 +135,12 @@ export class StatusTreeView implements vscode.TreeDataProvider<TreeItem> {
       const clientItem = new vscode.TreeItem(`Clients: ${health.clients}`);
       clientItem.iconPath = new vscode.ThemeIcon('device-mobile');
       items.push(clientItem);
+
+      if (health.gitStatus?.available) {
+        const gitItem = new vscode.TreeItem(`Git changes: ${health.gitStatus.changedCount}`);
+        gitItem.iconPath = new vscode.ThemeIcon('source-control');
+        items.push(gitItem);
+      }
 
       if (health.pendingApprovalCount > 0) {
         const approvalItem = new vscode.TreeItem(

@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CursorRemote: watch extension",
+      "type": "npm",
+      "script": "watch:ext",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "CursorRemote: dev server",
+      "type": "npm",
+      "script": "dev",
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

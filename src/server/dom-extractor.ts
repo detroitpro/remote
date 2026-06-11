@@ -1992,6 +1992,7 @@ export function extractionFunction(
       composerQueue: { items: queueItems, ...(queueLabel ? { queueLabel } : {}) },
       questionnaire,
       backgroundTasks,
+      gitStatus: null,
       agentStopSelectorPath,
       _rawSignals,
     };

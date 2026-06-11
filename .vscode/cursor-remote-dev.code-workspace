@@ -1,0 +1,16 @@
+{
+  "folders": [
+    {
+      "name": "cursor-ide-remote",
+      "path": ".."
+    },
+    {
+      "path": "../../../Mddp/usy_aflex_initdatag01"
+    }
+  ],
+  "settings": {
+    "cursorRemote.autoStart": true,
+    "cursorRemote.cdpUrl": "http://127.0.0.1:19222",
+    "cursorRemote.serverPort": 3002
+  }
+}

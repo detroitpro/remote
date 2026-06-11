@@ -2,9 +2,9 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server as SocketServer, type Socket } from 'socket.io';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 import { randomBytes, timingSafeEqual } from 'crypto';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import type { ServerConfig, CursorState, CommandPayload, CommandResult } from './types.js';
 import type { ViteDevServer } from 'vite';
 import { waitForFreshExtraction } from './extraction-wait.js';
@@ -14,6 +14,9 @@ import type { CommandExecutor } from './command-executor.js';
 import type { CDPBridge } from './cdp-bridge.js';
 import { CursorStorageHistory } from './cursor-storage-history.js';
 import { markdownToWebHtml, readPlanFile } from './plan-files.js';
+import type { ExtensionFileBridge } from './extension-file-bridge.js';
+import { SERVER_INSTANCE } from './server-info.js';
+import type { ServerDiagnostics } from '../shared/diagnostics.js';
 import {
   WEBAPP_SESSION_COOKIE,
   createWebappSessionStore,
@@ -24,6 +27,19 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const POST_COMMAND_REFRESH_DELAYS_MS = [0, 150, 450, 1000, 2000];
+
+function resolveClientDir(serverDir: string): { clientDir: string; clientBuild: 'vite-dev' | 'static' } {
+  const clientSrc = process.env.CLIENT_SRC_DIR?.trim();
+  if (clientSrc && existsSync(clientSrc)) {
+    return { clientDir: resolve(clientSrc), clientBuild: 'vite-dev' };
+  }
+  const bundledClientDir = join(serverDir, '..', 'client');
+  const isSourceClient = bundledClientDir.replace(/\\/g, '/').endsWith('/src/client');
+  return {
+    clientDir: bundledClientDir,
+    clientBuild: isSourceClient ? 'vite-dev' : 'static',
+  };
+}
 
 interface RateLimitEntry {
   count: number;
@@ -120,9 +136,12 @@ export class Relay {
   private stateManager: StateManager;
   private commandExecutor: CommandExecutor;
   private cdpBridge: CDPBridge;
+  private extensionBridge: ExtensionFileBridge;
   private storageHistory: CursorStorageHistory;
   private viteDevServer?: Promise<ViteDevServer>;
   private requestFreshExtraction: () => void;
+  private readonly clientBuild: 'vite-dev' | 'static';
+  private readonly clientDir: string;
 
   private sessionStore: WebappSessionStore;
   private loginAttempts = new Map<string, RateLimitEntry>();
@@ -139,15 +158,23 @@ export class Relay {
     stateManager: StateManager,
     commandExecutor: CommandExecutor,
     cdpBridge: CDPBridge,
+    extensionBridge: ExtensionFileBridge,
     requestFreshExtraction: () => void = () => {}
   ) {
     this.config = config;
     this.stateManager = stateManager;
     this.commandExecutor = commandExecutor;
     this.cdpBridge = cdpBridge;
+    this.extensionBridge = extensionBridge;
     this.requestFreshExtraction = requestFreshExtraction;
     this.storageHistory = new CursorStorageHistory(config.cursorStateDbPath);
     this.sessionStore = createWebappSessionStore(config.dataDir);
+    const resolvedClient = resolveClientDir(__dirname);
+    this.clientDir = resolvedClient.clientDir;
+    this.clientBuild = resolvedClient.clientBuild;
+    if (this.clientBuild === 'vite-dev') {
+      console.log(`[relay] Serving web client from source via Vite: ${this.clientDir}`);
+    }
 
     this.app = express();
     this.httpServer = createServer(this.app);
@@ -241,9 +268,35 @@ export class Relay {
     return undefined;
   }
 
+  private buildDiagnostics(): ServerDiagnostics {
+    const state = this.stateManager.getCurrentState();
+    const activeWindow = state.windows.find(window => window.id === state.activeWindowId);
+    return {
+      server: {
+        version: SERVER_INSTANCE.version,
+        instanceId: SERVER_INSTANCE.instanceId,
+        pid: SERVER_INSTANCE.pid,
+        port: this.config.serverPort,
+        host: this.config.serverHost,
+        dataDirName: basename(this.config.dataDir),
+        startedAt: SERVER_INSTANCE.startedAt,
+        clientBuild: this.clientBuild,
+      },
+      extensionBridge: this.extensionBridge.getDiagnostics(),
+      gitStatus: state.gitStatus,
+      connected: state.connected,
+      generation: this.stateManager.generation,
+      uptime: process.uptime(),
+      clients: this.io.engine.clientsCount,
+      activeWindowId: state.activeWindowId,
+      activeWindowTitle: activeWindow?.title ?? null,
+      cdpUrl: this.config.cdpUrl,
+    };
+  }
+
   private setupRoutes(): void {
-    const clientDir = join(__dirname, '..', 'client');
-    const isSourceClient = clientDir.replace(/\\/g, '/').endsWith('/src/client');
+    const clientDir = this.clientDir;
+    const isSourceClient = this.clientBuild === 'vite-dev';
 
     this.app.use(express.json());
 
@@ -292,28 +345,38 @@ export class Relay {
     });
 
     this.app.get('/health', (req, res) => {
-      const state = this.stateManager.getCurrentState();
+      const diagnostics = this.buildDiagnostics();
       const sessionOk = !this.authEnabled || this.resolveHttpSession(req) !== undefined;
       res.json({
         ok: true,
         authRequired: this.authEnabled,
         sessionValid: sessionOk,
-        connected: state.connected,
-        extractorStatus: state.extractorStatus,
-        lastExtractionAt: state.lastExtractionAt,
-        consecutiveExtractionFailures: state.consecutiveExtractionFailures,
-        lastExtractionError: state.lastExtractionError,
-        agentStatus: state.agentStatus,
-        clients: this.io.engine.clientsCount,
-        uptime: process.uptime(),
-        windows: state.windows,
-        activeWindowId: state.activeWindowId,
-        mode: state.mode?.current ?? null,
-        model: state.model?.current ?? null,
-        chatTabCount: state.chatTabs?.length ?? 0,
-        pendingApprovalCount: state.pendingApprovals?.length ?? 0,
-        generation: this.stateManager.generation,
+        connected: diagnostics.connected,
+        extractorStatus: this.stateManager.getCurrentState().extractorStatus,
+        lastExtractionAt: this.stateManager.getCurrentState().lastExtractionAt,
+        consecutiveExtractionFailures: this.stateManager.getCurrentState().consecutiveExtractionFailures,
+        lastExtractionError: this.stateManager.getCurrentState().lastExtractionError,
+        agentStatus: this.stateManager.getCurrentState().agentStatus,
+        clients: diagnostics.clients,
+        uptime: diagnostics.uptime,
+        windows: this.stateManager.getCurrentState().windows,
+        activeWindowId: diagnostics.activeWindowId,
+        mode: this.stateManager.getCurrentState().mode?.current ?? null,
+        model: this.stateManager.getCurrentState().model?.current ?? null,
+        chatTabCount: this.stateManager.getCurrentState().chatTabs?.length ?? 0,
+        pendingApprovalCount: this.stateManager.getCurrentState().pendingApprovals?.length ?? 0,
+        gitStatus: diagnostics.gitStatus,
+        generation: diagnostics.generation,
+        server: diagnostics.server,
       });
+    });
+
+    this.app.get('/debug/info', (req, res) => {
+      if (this.authEnabled && this.resolveHttpSession(req) === undefined) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      res.json(this.buildDiagnostics());
     });
 
     this.app.get('/debug/state', (req, res) => {
@@ -328,6 +391,7 @@ export class Relay {
         agentActivityText: state.agentActivityText,
         agentActivityLive: state.agentActivityLive,
         pendingApprovals: state.pendingApprovals,
+        gitStatus: state.gitStatus,
         chatTabs: state.chatTabs.map((t) => ({
           isActive: t.isActive,
           title: t.title,
@@ -394,14 +458,21 @@ export class Relay {
   }
 
   private getViteDevServer(clientDir: string): Promise<ViteDevServer> {
-    this.viteDevServer ??= import('vite').then(({ createServer }) => createServer({
-      root: clientDir,
-      server: {
-        middlewareMode: true,
-        hmr: false,
-      },
-      appType: 'spa',
-    }));
+    this.viteDevServer ??= import('vite').then(({ createServer }) => {
+      const packageRoot = process.env.PACKAGE_ROOT?.trim();
+      const configFile = packageRoot && existsSync(join(packageRoot, 'vite.config.ts'))
+        ? join(packageRoot, 'vite.config.ts')
+        : undefined;
+      return createServer({
+        root: clientDir,
+        configFile,
+        server: {
+          middlewareMode: true,
+          hmr: false,
+        },
+        appType: 'spa',
+      });
+    });
     return this.viteDevServer;
   }
 
@@ -768,6 +839,28 @@ export class Relay {
           this.requestFreshExtractionBurst();
         }
         socket.emit('command:result', result);
+      });
+
+      socket.on('command:open_source_control', async (payload: CommandPayload) => {
+        if (!payload.commandId) {
+          socket.emit('command:result', {
+            commandId: 'unknown',
+            ok: false,
+            error: 'Missing commandId',
+          } satisfies CommandResult);
+          return;
+        }
+        console.log(`[relay] Command: open_source_control from ${socket.id}`);
+        try {
+          await this.extensionBridge.requestOpenSourceControl(payload.commandId);
+          socket.emit('command:result', { commandId: payload.commandId, ok: true } satisfies CommandResult);
+        } catch (err) {
+          socket.emit('command:result', {
+            commandId: payload.commandId,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          } satisfies CommandResult);
+        }
       });
 
       socket.on('command:switch_window', async (payload: CommandPayload) => {

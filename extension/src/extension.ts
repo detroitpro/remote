@@ -6,6 +6,7 @@ import { ServerManager } from './server-manager.js';
 import { LicenseManager } from './license-manager.js';
 import { StatusTreeView } from './tree-view.js';
 import { SetupPanel } from './setup-panel.js';
+import { GitStateBridge } from './git-state-bridge.js';
 
 let serverManager: ServerManager | undefined;
 
@@ -33,6 +34,18 @@ async function ensurePassword(): Promise<void> {
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const outputChannel = createOutputChannel();
+  const extensionMode = context.extensionMode === vscode.ExtensionMode.Development ? 'development' : 'installed';
+  outputChannel.info(
+    `[extension] CursorRemote activate (${extensionMode}) path=${context.extensionPath}`
+  );
+  if (
+    context.extensionMode === vscode.ExtensionMode.Development
+    && context.extensionPath.replace(/\\/g, '/').includes('/.cursor/extensions/')
+  ) {
+    outputChannel.warn(
+      '[extension] Development host is using an installed extension copy — launch via F5 "CursorRemote: Extension Dev Host", not by opening the workspace in a normal window.'
+    );
+  }
 
   const statusBarItem = createStatusBar(context);
 
@@ -53,9 +66,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const extensionVersion = context.extension.packageJSON?.version ?? 'unknown';
   const treeView = new StatusTreeView(serverManager, licenseManager, extensionVersion);
+  const gitStateBridge = new GitStateBridge(context, outputChannel, serverManager);
+  gitStateBridge.start();
 
   context.subscriptions.push(
     outputChannel,
+    gitStateBridge,
     vscode.window.registerTreeDataProvider('cursorRemote.status', treeView),
     vscode.commands.registerCommand('cursorRemote.start', () => serverManager!.start()),
     vscode.commands.registerCommand('cursorRemote.stop', () => serverManager!.stop(true)),
@@ -72,6 +88,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       treeView.refresh();
     }),
     vscode.commands.registerCommand('cursorRemote.openSetup', () => SetupPanel.createOrShow(context)),
+    vscode.commands.registerCommand('cursorRemote.openSourceControl', async () => {
+      await vscode.commands.executeCommand('workbench.view.scm');
+    }),
   );
 
   ensurePassword().catch(err => {

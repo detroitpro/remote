@@ -476,6 +476,7 @@ describe('web: attachments', () => {
       composerQueue: { items: [] },
       questionnaire: null,
       backgroundTasks: [],
+      gitStatus: null,
       agentStopSelectorPath: '',
     };
   }
@@ -547,6 +548,7 @@ describe('web: background tasks', () => {
       composerQueue: { items: [] },
       questionnaire: null,
       backgroundTasks: [],
+      gitStatus: null,
       agentStopSelectorPath: '',
     };
   }
@@ -599,6 +601,111 @@ describe('web: background tasks', () => {
   });
 });
 
+describe('web: git status', () => {
+  let env: ReturnType<typeof createTestEnv>;
+
+  beforeEach(() => {
+    env = createTestEnv();
+  });
+
+  afterEach(() => env.cleanup());
+
+  function baseState(): CursorState {
+    return {
+      connected: true,
+      extractorStatus: 'ok',
+      lastExtractionAt: Date.now(),
+      consecutiveExtractionFailures: 0,
+      lastExtractionError: null,
+      agentStatus: 'idle',
+      agentActivityText: null,
+      agentActivityLive: false,
+      agentActivitySource: 'none',
+      messages: [],
+      pendingApprovals: [],
+      inputAvailable: true,
+      chatTabs: [],
+      activeComposerId: '',
+      mode: { current: 'agent', available: [] },
+      model: { current: 'Auto', currentId: '' },
+      windows: [],
+      activeWindowId: '',
+      composerQueue: { items: [] },
+      questionnaire: null,
+      backgroundTasks: [],
+      gitStatus: null,
+      agentStopSelectorPath: '',
+    };
+  }
+
+  it('shows git count and opens source control', async () => {
+    fireFullState(env.mockSocket, {
+      ...baseState(),
+      gitStatus: {
+        available: true,
+        changedCount: 3,
+        repoLabel: 'cursor-ide-remote',
+        updatedAt: Date.now(),
+        source: 'vscode.git',
+      },
+    });
+
+    const pill = env.document.getElementById('pill-git-status') as HTMLButtonElement;
+    assert.ok(pill, 'Expected git status pill to be rendered');
+    assert.equal(pill.textContent, 'F:3');
+
+    await act(async () => {
+      pill.click();
+    });
+
+    const sent = env.mockSocket.emitted.find(item => item.event === 'command:open_source_control');
+    assert.ok(sent, 'Expected git pill to emit open_source_control');
+
+    const commandId = String((sent.args[0] as { commandId: string }).commandId);
+    act(() => env.mockSocket.fire('command:result', { commandId, ok: true }));
+  });
+
+  it('keeps git pill visible for clean repositories', () => {
+    fireFullState(env.mockSocket, {
+      ...baseState(),
+      gitStatus: {
+        available: true,
+        changedCount: 0,
+        repoLabel: 'cursor-ide-remote',
+        updatedAt: Date.now(),
+        source: 'vscode.git',
+      },
+    });
+
+    const pill = env.document.getElementById('pill-git-status') as HTMLButtonElement;
+    assert.ok(pill, 'Expected git status pill to be rendered');
+    assert.equal(pill.textContent, 'F:0');
+  });
+});
+
+describe('web: debug panel', () => {
+  let env: ReturnType<typeof createTestEnv>;
+
+  beforeEach(() => {
+    env = createTestEnv();
+  });
+
+  afterEach(() => env.cleanup());
+
+  it('renders debug pill and opens debug sheet', async () => {
+    const pill = env.document.getElementById('pill-debug') as HTMLButtonElement;
+    assert.ok(pill, 'Expected debug pill to be rendered');
+
+    await act(async () => {
+      pill.click();
+    });
+
+    const sheet = env.document.getElementById('sheet-debug');
+    assert.ok(sheet, 'Expected debug sheet to open');
+    assert.equal(sheet?.classList.contains('hidden'), false);
+  });
+});
+
 // ─── Questionnaire widget rendering ───
 
 describe('web: questionnaire widget', () => {
@@ -633,6 +740,7 @@ describe('web: questionnaire widget', () => {
       composerQueue: { items: [] },
       questionnaire: null,
       backgroundTasks: [],
+      gitStatus: null,
       agentStopSelectorPath: '',
     };
   }

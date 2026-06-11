@@ -22,6 +22,7 @@ export class ServerManager extends EventEmitter {
   private _isOwner = false;
   private _takingOver = false;
   private _reactingToFlag = false;
+  private _startInFlight: Promise<void> | null = null;
   private getLicenseKey: () => Promise<string | undefined>;
   private readonly windowName: string;
   private readonly manualStopPath: string;
@@ -125,11 +126,20 @@ export class ServerManager extends EventEmitter {
   }
 
   async start(): Promise<void> {
+    if (this._startInFlight) return this._startInFlight;
+
+    this._startInFlight = this.startNow().finally(() => {
+      this._startInFlight = null;
+    });
+    return this._startInFlight;
+  }
+
+  private async startNow(): Promise<void> {
     this._reactingToFlag = true;
     this.setManualStop(false);
-    this._reactingToFlag = false;
 
     if (this.child) {
+      this._reactingToFlag = false;
       vscode.window.showInformationMessage('Server is already running (owned by this window).');
       return;
     }
@@ -137,6 +147,7 @@ export class ServerManager extends EventEmitter {
     const { port, host } = this.getHealthUrl();
     const alreadyRunning = await this.probeExistingServer();
     if (alreadyRunning) {
+      this._reactingToFlag = false;
       this.outputChannel.info(`[${this.windowName}] Server already running — attaching as observer.`);
       this._isOwner = false;
       this.setState(this.lastHealth?.connected ? 'running' : 'disconnected');
@@ -159,8 +170,11 @@ export class ServerManager extends EventEmitter {
     }
 
     const serverScript = join(this.context.extensionPath, 'dist', 'server', 'bundle.mjs');
+    const extensionMode = this.context.extensionMode === vscode.ExtensionMode.Development ? 'development' : 'installed';
 
-    this.outputChannel.info(`[${this.windowName}] Starting server: ${serverScript}`);
+    this.outputChannel.info(
+      `[${this.windowName}] Starting server (${extensionMode}): ${serverScript}`
+    );
 
     this.child = spawn(process.execPath, ['--no-deprecation', '--disable-warning=DEP0040', serverScript], {
       cwd: this.context.extensionPath,
@@ -220,6 +234,7 @@ export class ServerManager extends EventEmitter {
       this.setState('error');
     });
 
+    this._reactingToFlag = false;
     this.outputChannel.show(true);
     this.setState('disconnected');
     this.startHealthPolling(env.SERVER_PORT, env.SERVER_HOST);

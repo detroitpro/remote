@@ -1,4 +1,4 @@
-import { createWriteStream, appendFileSync, readFileSync } from 'fs';
+import { createWriteStream, appendFileSync } from 'fs';
 import { checkLicense } from './license.js';
 import { loadConfig, loadSelectors } from './config.js';
 import { CDPBridge } from './cdp-bridge.js';
@@ -7,6 +7,8 @@ import { CommandExecutor } from './command-executor.js';
 import { StateManager } from './state-manager.js';
 import { WindowMonitor } from './window-monitor.js';
 import { Relay } from './relay.js';
+import { ExtensionFileBridge } from './extension-file-bridge.js';
+import { SERVER_INSTANCE } from './server-info.js';
 import type { Transport } from './transports/types.js';
 import { TelegramTransport } from './transports/telegram/index.js';
 import { RawTelegramTransport } from './transports/telegram-raw/index.js';
@@ -59,14 +61,7 @@ process.on('uncaughtException', (err) => {
 });
 
 async function main(): Promise<void> {
-  let version = 'unknown';
-  for (const rel of ['../../package.json', '../package.json', '../../../package.json']) {
-    try {
-      const pkg = JSON.parse(readFileSync(new URL(rel, import.meta.url), 'utf-8'));
-      if (pkg.name === 'cursor-remote') { version = pkg.version; break; }
-    } catch { /* try next */ }
-  }
-  console.log(`=== CursorRemote v${version} ===`);
+  console.log(`=== CursorRemote v${SERVER_INSTANCE.version} [${SERVER_INSTANCE.instanceId}] pid=${SERVER_INSTANCE.pid} ===`);
   console.log();
 
   checkLicense();
@@ -83,6 +78,7 @@ async function main(): Promise<void> {
 
   const stateManager = new StateManager(config.debounceMs);
   const commandExecutor = new CommandExecutor(selectors);
+  const extensionBridge = new ExtensionFileBridge(config.dataDir, stateManager);
 
   const cdpBridge = new CDPBridge(config);
 
@@ -119,7 +115,9 @@ async function main(): Promise<void> {
 
   const transports: Transport[] = [];
 
-  const relay = new Relay(config, stateManager, commandExecutor, cdpBridge, () => {
+  extensionBridge.start();
+
+  const relay = new Relay(config, stateManager, commandExecutor, cdpBridge, extensionBridge, () => {
     extractor.requestPoll(0);
   });
   await relay.start();
@@ -163,6 +161,7 @@ async function main(): Promise<void> {
     for (const transport of transports) {
       await transport.stop();
     }
+    extensionBridge.stop();
     await cdpBridge.disconnect();
     await relay.stop();
     process.exit(0);

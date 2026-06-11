@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { ServerIdentity } from '../../src/shared/diagnostics.js';
 
 export interface HealthData {
   ok: boolean;
@@ -13,6 +14,8 @@ export interface HealthData {
   chatTabCount: number;
   pendingApprovalCount: number;
   generation: number;
+  gitStatus?: { available: boolean; changedCount: number } | null;
+  server?: ServerIdentity;
 }
 
 export type ServerState = 'running' | 'disconnected' | 'stopped' | 'error';
@@ -66,10 +69,13 @@ export function updateStatusBar(
 function buildTooltip(health?: HealthData): string {
   if (!health) return 'Running';
   const lines = [
-    `Port: ${health.clients !== undefined ? 'connected' : 'unknown'}`,
+    health.server
+      ? `Server v${health.server.version} :${health.server.port} [${health.server.instanceId}]`
+      : 'Server: connected',
     `Clients: ${health.clients}`,
     `Agent: ${health.agentStatus}`,
   ];
+  if (health.gitStatus?.available) lines.push(`Git changes: ${health.gitStatus.changedCount}`);
   if (health.mode) lines.push(`Mode: ${health.mode}`);
   if (health.model) lines.push(`Model: ${health.model}`);
   const activeWindow = health.windows?.find(w => w.id === health.activeWindowId);
