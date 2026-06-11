@@ -23,6 +23,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const POST_COMMAND_REFRESH_DELAYS_MS = [0, 150, 450, 1000, 2000];
 
 interface RateLimitEntry {
   count: number;
@@ -457,6 +458,9 @@ export class Relay {
           text || undefined,
           attachments
         );
+        if (result.ok) {
+          this.requestFreshExtractionBurst();
+        }
         socket.emit('command:result', result);
       });
 
@@ -761,7 +765,7 @@ export class Relay {
           payload.selectorPath
         );
         if (result.ok) {
-          this.requestFreshExtraction();
+          this.requestFreshExtractionBurst();
         }
         socket.emit('command:result', result);
       });
@@ -799,5 +803,11 @@ export class Relay {
     this.stateManager.on('connection:changed', (connected: boolean) => {
       this.io.emit('connection:status', { connected });
     });
+  }
+
+  private requestFreshExtractionBurst(): void {
+    for (const delayMs of POST_COMMAND_REFRESH_DELAYS_MS) {
+      setTimeout(() => this.requestFreshExtraction(), delayMs);
+    }
   }
 }

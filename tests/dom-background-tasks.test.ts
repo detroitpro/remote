@@ -72,6 +72,48 @@ describe('dom extractor: background tasks', () => {
     assert.ok(state);
     assert.equal(state.backgroundTasks.length, 0);
     assert.equal(resolvedStopButton?.getAttribute('data-stop-button'), 'true');
+    assert.equal(state.agentStatus, 'generating');
+  });
+
+  it('uses Cursor composer stop control outside the transcript container', () => {
+    let resolvedStopButton: Element | null = null;
+    const state = withDom(`
+      <div id="container">
+        <div data-flat-index="1">
+          <div data-message-role="human" data-message-id="m1">
+            <div class="aislash-editor-input-readonly">hello</div>
+          </div>
+        </div>
+      </div>
+      <div class="button-container composer-button-area">
+        <div class="send-with-mode">
+          <div class="anysphere-icon-button" data-stop-button="true">
+            <span class="codicon codicon-debug-stop"></span>
+          </div>
+        </div>
+      </div>
+    `, () => {
+      const extracted = extractionFunction(
+        ['#container'],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        []
+      );
+      if (extracted?.agentStopSelectorPath) {
+        resolvedStopButton = document.querySelector(extracted.agentStopSelectorPath);
+      }
+      return extracted;
+    });
+
+    assert.ok(state);
+    assert.equal(resolvedStopButton?.getAttribute('data-stop-button'), 'true');
+    assert.equal(state.agentStatus, 'generating');
   });
 
   it('surfaces Cursor toolbar background terminal items', () => {

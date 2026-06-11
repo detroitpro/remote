@@ -1431,6 +1431,13 @@ export function extractionFunction(
       }
       return null;
     };
+    const findComposerStopControl = (): Element | null => {
+      const explicit = document.querySelector('[data-stop-button="true"]');
+      if (explicit) return explicit;
+
+      const debugStopIcon = document.querySelector('.composer-button-area .codicon-debug-stop, .send-with-mode .codicon-debug-stop');
+      return debugStopIcon?.closest('[data-click-ready="true"], .anysphere-icon-button, button') ?? null;
+    };
     const cleanTaskText = (raw: string): string =>
       raw.replace(/\s+/g, ' ').replace(/^\$\s*/, '').trim();
 
@@ -1496,7 +1503,7 @@ export function extractionFunction(
         stopSelectorPath: buildSelectorPath(stopBtn),
       });
     }
-    const agentStopButton = findStopButton(container);
+    const agentStopButton = findComposerStopControl() || findStopButton(container);
     const agentStopSelectorPath = agentStopButton
       ? buildSelectorPath(agentStopButton)
       : (backgroundTasks.find((task) => task.stopSelectorPath)?.stopSelectorPath ?? '');
@@ -1513,6 +1520,9 @@ export function extractionFunction(
       else if (combined.includes('error') || combined.includes('fail')) agentStatus = 'error';
     }
     if (actionableApprovals.length > 0) agentStatus = 'waiting_approval';
+    if (agentStatus === 'idle' && agentStopSelectorPath) {
+      agentStatus = 'generating';
+    }
 
     // Element-based status detection removed: tool loading badges and
     // run_command elements persist in the DOM long after completion.
