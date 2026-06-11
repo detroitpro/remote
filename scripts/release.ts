@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { resolve } from 'path';
 import { updateVsixInstallDocs } from './update-vsix-install-docs.js';
+import { parseBaseSemver } from './version-utils.js';
 
 const PKG_PATH = resolve(process.cwd(), 'package.json');
 const CHANGELOG_PATH = resolve(process.cwd(), 'CHANGELOG.md');
@@ -9,7 +10,7 @@ const CHANGELOG_PATH = resolve(process.cwd(), 'CHANGELOG.md');
 type BumpType = 'patch' | 'minor' | 'major';
 
 function bumpVersion(current: string, type: BumpType): string {
-  const [major, minor, patch] = current.split('.').map(Number);
+  const { major, minor, patch } = parseBaseSemver(current);
   switch (type) {
     case 'major': return `${major + 1}.0.0`;
     case 'minor': return `${major}.${minor + 1}.0`;

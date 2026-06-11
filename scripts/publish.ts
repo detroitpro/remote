@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'fs';
 import { execSync } from 'child_process';
 import { resolve } from 'path';
+import { parseBaseSemver } from './version-utils.js';
 
 const DEV_ROOT = resolve(process.cwd());
 const PUBLIC_ROOT = resolve(process.env.HOME ?? '~', 'Dev', 'CursorRemote');
@@ -27,7 +28,17 @@ const EXCLUDE = [
 
 function getVersion(): string {
   const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf-8'));
-  return pkg.version as string;
+  return parseBaseSemver(pkg.version as string).base;
+}
+
+function normalizePublicPackageJson(): void {
+  const pkgPath = resolve(PUBLIC_ROOT, 'package.json');
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
+  pkg.publisher = 'cursor-remote';
+  pkg.displayName = 'CursorRemote';
+  pkg.version = parseBaseSemver(String(pkg.version)).base;
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+  console.log('✓ Normalized public package.json for marketplace (publisher cursor-remote)');
 }
 
 function getChangelogSection(version: string): string {
@@ -102,12 +113,24 @@ function vsixPath(version: string): string {
 
 function packageVsix(version: string): string {
   const out = vsixPath(version);
+  const pkgPath = resolve(DEV_ROOT, 'package.json');
+  const backup = readFileSync(pkgPath, 'utf-8');
+  const pkg = JSON.parse(backup) as Record<string, unknown>;
+  pkg.publisher = 'cursor-remote';
+  pkg.displayName = 'CursorRemote';
+  pkg.version = version;
+  writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+
   console.log('\n— Packaging .vsix —');
-  execSync(`npx @vscode/vsce package --no-dependencies --out ${JSON.stringify(out)}`, {
-    cwd: DEV_ROOT,
-    stdio: 'inherit',
-  });
-  return out;
+  try {
+    execSync(`npx @vscode/vsce package --no-dependencies --out ${JSON.stringify(out)}`, {
+      cwd: DEV_ROOT,
+      stdio: 'inherit',
+    });
+    return out;
+  } finally {
+    writeFileSync(pkgPath, backup, 'utf-8');
+  }
 }
 
 function verifyVsix(vsix: string): void {
@@ -183,6 +206,7 @@ function main(): void {
   }
 
   rsyncToPublic();
+  normalizePublicPackageJson();
 
   if (!publicHasChanges()) {
     console.log('\nNo changes to publish. Public repo is up to date.');

@@ -1,11 +1,12 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { updateVsixInstallDocs } from './update-vsix-install-docs.js';
+import { parseBaseSemver } from './version-utils.js';
 
 const PKG_PATH = resolve(process.cwd(), 'package.json');
 
 const pkg = JSON.parse(readFileSync(PKG_PATH, 'utf-8'));
-const [major, minor, patch] = pkg.version.split('.').map(Number);
+const { major, minor, patch } = parseBaseSemver(pkg.version as string);
 const newVersion = `${major}.${minor}.${patch + 1}`;
 
 pkg.version = newVersion;
