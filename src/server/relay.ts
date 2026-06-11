@@ -121,6 +121,7 @@ export class Relay {
   private cdpBridge: CDPBridge;
   private storageHistory: CursorStorageHistory;
   private viteDevServer?: Promise<ViteDevServer>;
+  private requestFreshExtraction: () => void;
 
   private sessionStore: WebappSessionStore;
   private loginAttempts = new Map<string, RateLimitEntry>();
@@ -136,12 +137,14 @@ export class Relay {
     config: ServerConfig,
     stateManager: StateManager,
     commandExecutor: CommandExecutor,
-    cdpBridge: CDPBridge
+    cdpBridge: CDPBridge,
+    requestFreshExtraction: () => void = () => {}
   ) {
     this.config = config;
     this.stateManager = stateManager;
     this.commandExecutor = commandExecutor;
     this.cdpBridge = cdpBridge;
+    this.requestFreshExtraction = requestFreshExtraction;
     this.storageHistory = new CursorStorageHistory(config.cursorStateDbPath);
     this.sessionStore = createWebappSessionStore(config.dataDir);
 
@@ -757,6 +760,9 @@ export class Relay {
           payload.commandId,
           payload.selectorPath
         );
+        if (result.ok) {
+          this.requestFreshExtraction();
+        }
         socket.emit('command:result', result);
       });
 

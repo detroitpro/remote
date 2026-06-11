@@ -13,6 +13,7 @@ type EventHandler = (...args: unknown[]) => void;
 
 interface MockSocket {
   handlers: Map<string, EventHandler>;
+  emitted: Array<{ event: string; args: unknown[] }>;
   on(event: string, fn: EventHandler): void;
   emit(event: string, ...args: unknown[]): void;
   fire(event: string, ...args: unknown[]): void;
@@ -45,12 +46,15 @@ function createTestEnv() {
 
   const mockSocket: MockSocket = {
     handlers: new Map(),
+    emitted: [],
     connected: true,
     id: 'test-socket-id',
     on(event: string, fn: EventHandler) {
       this.handlers.set(event, fn);
     },
-    emit() { /* noop for tests */ },
+    emit(event: string, ...args: unknown[]) {
+      this.emitted.push({ event, args });
+    },
     fire(event: string, ...args: unknown[]) {
       const handler = this.handlers.get(event);
       if (handler) handler(...args);
@@ -173,6 +177,28 @@ describe('web: agent status', () => {
     const text = env.document.getElementById('agent-status-text')!;
     assert.match(text.textContent!, /Idle/i);
   });
+
+  it('keeps stop button visible and emits stop only when enabled', () => {
+    const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
+    fireFullState(env.mockSocket, fixture[0].state!);
+    const idleStop = env.document.getElementById('btn-agent-stop') as HTMLButtonElement;
+    assert.ok(idleStop, 'Stop button should always be rendered');
+    assert.equal(idleStop.disabled, true);
+
+    fireFullState(env.mockSocket, {
+      ...fixture[1].state!,
+      agentStatus: 'thinking',
+      agentActivityLive: true,
+      agentStopSelectorPath: '#stop-agent',
+    });
+    const activeStop = env.document.getElementById('btn-agent-stop') as HTMLButtonElement;
+    assert.equal(activeStop.disabled, false);
+    act(() => activeStop.click());
+
+    const sent = env.mockSocket.emitted.find(item => item.event === 'command:click_action');
+    assert.ok(sent, 'Expected stop button to emit click_action');
+    assert.equal((sent.args[0] as { selectorPath?: string }).selectorPath, '#stop-agent');
+  });
 });
 
 // ─── Message rendering ───
@@ -224,6 +250,28 @@ describe('web: message rendering', () => {
     });
     const updatedCount = msgs.querySelectorAll('[data-id]').length;
     assert.ok(updatedCount > initialCount, `Expected more messages after patch, got ${initialCount} -> ${updatedCount}`);
+  });
+
+  it('renders loading tool icon as spinner', () => {
+    const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
+    fireFullState(env.mockSocket, {
+      ...fixture[1].state!,
+      messages: [
+        {
+          type: 'tool',
+          id: 'loading-tool',
+          flatIndex: 1,
+          toolCallId: 'tool-1',
+          status: 'loading',
+          action: 'Running',
+          details: 'npm test',
+        },
+      ],
+    });
+    const spinner = env.document.querySelector('.tool-line.loading .tool-spinner');
+    assert.ok(spinner, 'Loading tool should render a spinner icon');
+    const icon = env.document.querySelector('.tool-line.loading .tool-icon');
+    assert.equal(icon?.textContent, '');
   });
 });
 
@@ -427,6 +475,8 @@ describe('web: attachments', () => {
       activeWindowId: '',
       composerQueue: { items: [] },
       questionnaire: null,
+      backgroundTasks: [],
+      agentStopSelectorPath: '',
     };
   }
 
@@ -463,6 +513,92 @@ describe('web: attachments', () => {
   });
 });
 
+// ─── Background task indicator ───
+
+describe('web: background tasks', () => {
+  let env: ReturnType<typeof createTestEnv>;
+
+  beforeEach(() => {
+    env = createTestEnv();
+  });
+
+  afterEach(() => env.cleanup());
+
+  function baseState(): CursorState {
+    return {
+      connected: true,
+      extractorStatus: 'ok',
+      lastExtractionAt: Date.now(),
+      consecutiveExtractionFailures: 0,
+      lastExtractionError: null,
+      agentStatus: 'idle',
+      agentActivityText: null,
+      agentActivityLive: false,
+      agentActivitySource: 'none',
+      messages: [],
+      pendingApprovals: [],
+      inputAvailable: true,
+      chatTabs: [],
+      activeComposerId: '',
+      mode: { current: 'agent', available: [] },
+      model: { current: 'Auto', currentId: '' },
+      windows: [],
+      activeWindowId: '',
+      composerQueue: { items: [] },
+      questionnaire: null,
+      backgroundTasks: [],
+      agentStopSelectorPath: '',
+    };
+  }
+
+  it('shows background count and sends stop action from the sheet', () => {
+    fireFullState(env.mockSocket, {
+      ...baseState(),
+      backgroundTasks: [
+        { id: 'b1', label: 'npm run dev', stopSelectorPath: '#stop-one' },
+        { id: 'b2', label: 'npm test --watch' },
+      ],
+    });
+
+    const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
+    assert.equal(pill.textContent, 'B:1');
+
+    act(() => pill.click());
+    const sheet = env.document.getElementById('sheet-background-tasks')!;
+    assert.ok(!sheet.classList.contains('hidden'));
+    assert.match(sheet.textContent || '', /npm run dev/);
+    assert.doesNotMatch(sheet.textContent || '', /npm test --watch/);
+
+    const stop = sheet.querySelector('.background-task-stop') as HTMLButtonElement;
+    act(() => stop.click());
+
+    const sent = env.mockSocket.emitted.find(item => item.event === 'command:click_action');
+    assert.ok(sent, 'Expected stop to emit click_action');
+    assert.equal((sent.args[0] as { selectorPath?: string }).selectorPath, '#stop-one');
+  });
+
+  it('does not count foreground loading tool messages as background tasks', () => {
+    fireFullState(env.mockSocket, {
+      ...baseState(),
+      agentStopSelectorPath: '#stop-agent',
+      messages: [
+        {
+          type: 'tool',
+          id: 'loading-tool',
+          flatIndex: 1,
+          toolCallId: 'tool-1',
+          status: 'loading',
+          action: 'Running',
+          details: 'npm test',
+        },
+      ],
+    });
+
+    const pill = env.document.getElementById('pill-background-tasks');
+    assert.equal(pill, null);
+  });
+});
+
 // ─── Questionnaire widget rendering ───
 
 describe('web: questionnaire widget', () => {
@@ -496,6 +632,8 @@ describe('web: questionnaire widget', () => {
       activeWindowId: '',
       composerQueue: { items: [] },
       questionnaire: null,
+      backgroundTasks: [],
+      agentStopSelectorPath: '',
     };
   }
 

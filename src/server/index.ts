@@ -119,7 +119,9 @@ async function main(): Promise<void> {
 
   const transports: Transport[] = [];
 
-  const relay = new Relay(config, stateManager, commandExecutor, cdpBridge);
+  const relay = new Relay(config, stateManager, commandExecutor, cdpBridge, () => {
+    extractor.requestPoll(0);
+  });
   await relay.start();
 
   console.log('[main] Connecting to Cursor IDE...');

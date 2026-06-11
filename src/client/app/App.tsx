@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   Approval,
+  BackgroundTask,
   ChatElement,
   ChatTab,
   CodeBlockItem,
@@ -59,6 +60,10 @@ function messageRenderKey(msg: ChatElement): string {
 
 function commandResultData<T>(result: CommandResult): T | null {
   return (result.data ?? null) as T | null;
+}
+
+function getVisibleBackgroundTasks(state: CursorState): BackgroundTask[] {
+  return (state.backgroundTasks || []).filter(task => !!task.stopSelectorPath);
 }
 
 export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
@@ -153,6 +158,7 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
     activePlanModal,
     planModalBody,
     toasts,
+    backgroundTaskContext: null,
     openSheet: (type: SheetType) => setActiveSheet(type),
     closeSheet: () => setActiveSheet(null),
     openQueueSheet: (item: ComposerQueueItem) => {
@@ -246,6 +252,7 @@ function getConnectionUiState(state: CursorState, socketConnected: boolean) {
 }
 
 function HeaderStatus({ state, socketConnected }: { state: CursorState; socketConnected: boolean }) {
+  const command = useCommandClient();
   const connection = getConnectionUiState(state, socketConnected);
   const labels: Record<string, string> = {
     idle: 'Idle',
@@ -260,7 +267,10 @@ function HeaderStatus({ state, socketConnected }: { state: CursorState; socketCo
   const statusText = showActivity
     ? (activity.length > 56 ? `${activity.slice(0, 55)}...` : activity)
     : (labels[state.agentStatus] || state.agentStatus);
-  const headerRightClass = state.agentStatus === 'idle' ? 'header-right header-right-hidden' : 'header-right';
+  const headerRightClass = 'header-right';
+  const stopSelectorPath = state.agentStopSelectorPath || state.backgroundTasks?.find(task => task.stopSelectorPath)?.stopSelectorPath || '';
+  const hasActiveWork = state.agentActivityLive || state.agentStatus !== 'idle' || (state.backgroundTasks?.length || 0) > 0;
+  const stopEnabled = hasActiveWork && !!stopSelectorPath;
   const statusStyle = state.agentStatus === 'waiting_approval'
     ? { color: 'var(--accent-yellow)' }
     : state.agentStatus === 'error'
@@ -282,6 +292,19 @@ function HeaderStatus({ state, socketConnected }: { state: CursorState; socketCo
         >
           {statusText}
         </span>
+        <button
+          id="btn-agent-stop"
+          className="agent-stop-btn"
+          type="button"
+          aria-label="Stop agent"
+          disabled={!stopEnabled}
+          onClick={() => {
+            if (!stopEnabled) return;
+            command.emit('command:click_action', { selectorPath: stopSelectorPath });
+          }}
+        >
+          <span aria-hidden="true" />
+        </button>
       </div>
     </header>
   );
@@ -605,7 +628,9 @@ function ToolMessage({ message }: { message: Extract<ChatElement, { type: 'tool'
   return (
     <div className={`chat-el el-tool ${message.status === 'loading' ? 'loading' : ''}`} data-id={message.id} data-msg-type={message.type}>
       <div className={`tool-line ${message.status}`}>
-        <span className="tool-icon">{message.status === 'completed' ? '✓' : '•'}</span>
+        <span className="tool-icon">
+          {message.status === 'completed' ? '✓' : <span className="tool-spinner" aria-hidden="true" />}
+        </span>
         {message.summaryText ? (
           <span className="tool-summary">{message.summaryText}</span>
         ) : (
@@ -916,6 +941,7 @@ function ComposerInput({ state }: { state: CursorState }) {
   const inputDisabled = !state.inputAvailable;
   const canSend = !inputDisabled && (text.trim().length > 0 || attachments.length > 0);
   const currentMode = modeUi(state.mode?.current);
+  const backgroundTasks = getVisibleBackgroundTasks(state);
 
   const clearAttachments = useCallback(() => {
     setAttachments([]);
@@ -1002,6 +1028,17 @@ function ComposerInput({ state }: { state: CursorState }) {
           <span id="pill-model-text">{state.model?.current || 'Auto'}</span>
           <span className="pill-chevron">&#9662;</span>
         </button>
+        {backgroundTasks.length > 0 && (
+          <button
+            id="pill-background-tasks"
+            className="background-task-pill"
+            type="button"
+            aria-label={`${backgroundTasks.length} background task${backgroundTasks.length === 1 ? '' : 's'}`}
+            onClick={() => ui.openSheet('background-tasks')}
+          >
+            B:{backgroundTasks.length}
+          </button>
+        )}
       </div>
       <div className="input-wrapper" onPaste={handlePaste}>
         <AttachmentStrip attachments={attachments} onRemove={id => setAttachments(items => items.filter(item => item.id !== id))} />
@@ -1092,6 +1129,7 @@ function BottomSheetHost({ state }: { state: CursorState }) {
       <PlanModelSheet visible={active === 'plan-model'} />
       <TabActionsSheet state={state} visible={active === 'tab'} />
       <QueueActionsSheet visible={active === 'queue'} />
+      <BackgroundTasksSheet state={state} visible={active === 'background-tasks'} />
     </>
   );
 }
@@ -1295,6 +1333,43 @@ function QueueActionsSheet({ visible }: { visible: boolean }) {
       </button>
     );
   }
+}
+
+function BackgroundTasksSheet({ state, visible }: { state: CursorState; visible: boolean }) {
+  const ui = React.useContext(UiStateContext)!;
+  const command = useCommandClient();
+  const tasks = getVisibleBackgroundTasks(state);
+  return (
+    <div id="sheet-background-tasks" className={`bottom-sheet ${visible ? '' : 'hidden'}`}>
+      <div className="sheet-header">Background Tasks</div>
+      <div id="sheet-background-tasks-list" className="sheet-list">
+        {tasks.length === 0 && <p className="sheet-tab-hint">No background tasks are running.</p>}
+        {tasks.map((task, index) => (
+          <div key={task.id || index} className="background-task-sheet-item">
+            <div className="background-task-sheet-main">
+              <div className="background-task-sheet-title">{task.label || `Background task ${index + 1}`}</div>
+              {task.detail && <div className="background-task-sheet-detail">{task.detail}</div>}
+            </div>
+            {task.stopSelectorPath ? (
+              <button
+                type="button"
+                className="background-task-stop"
+                onClick={() => {
+                  command.emit('command:click_action', { selectorPath: task.stopSelectorPath });
+                  ui.closeSheet();
+                  ui.showToast('Stop sent', 'success');
+                }}
+              >
+                Stop
+              </button>
+            ) : (
+              <span className="background-task-no-action">No stop</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function PlanModal() {

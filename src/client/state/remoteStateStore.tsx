@@ -22,6 +22,8 @@ export const defaultCursorState: CursorState = {
   activeWindowId: '',
   composerQueue: { items: [] },
   questionnaire: null,
+  backgroundTasks: [],
+  agentStopSelectorPath: '',
 };
 
 export const RemoteStateContext = createContext<CursorState>(defaultCursorState);

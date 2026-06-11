@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
-import type { ComposerQueueItem, PlanBlock } from '../../server/types.js';
+import type { BackgroundTask, ComposerQueueItem, PlanBlock } from '../../server/types.js';
 
-export type SheetType = 'mode' | 'model' | 'plan-model' | 'tab' | 'queue' | null;
+export type SheetType = 'mode' | 'model' | 'plan-model' | 'tab' | 'queue' | 'background-tasks' | null;
 
 export interface ToastMessage {
   id: string;
@@ -17,6 +17,7 @@ export interface UiState {
   activePlanModal: PlanBlock | null;
   planModalBody: string;
   toasts: ToastMessage[];
+  backgroundTaskContext: BackgroundTask | null;
 }
 
 export interface UiActions {

@@ -1412,6 +1412,95 @@ export function extractionFunction(
 
     const actionableApprovals = pendingApprovals.filter((entry) => isActionableApproval(entry));
 
+    // --- Background task / terminal extraction ---
+    const backgroundTasks: CursorState['backgroundTasks'] = [];
+    const seenBackgroundCards = new Set<Element>();
+    const stopLabelRe = /\b(stop|cancel|interrupt|terminate|kill)\b/i;
+    const findStopButton = (card: Element): Element | null => {
+      const composerStop = card.querySelector('[data-stop-button="true"]');
+      if (composerStop) return composerStop;
+
+      const debugStopIcon = card.querySelector('.codicon-debug-stop');
+      const debugStopControl = debugStopIcon?.closest('[data-click-ready="true"], .anysphere-icon-button, button');
+      if (debugStopControl) return debugStopControl;
+
+      const buttons = Array.from(card.querySelectorAll('button')) as HTMLButtonElement[];
+      for (const btn of buttons) {
+        const label = `${getButtonLabel(btn)} ${btn.getAttribute('aria-label') || ''} ${btn.getAttribute('title') || ''}`.trim();
+        if (stopLabelRe.test(label)) return btn;
+      }
+      return null;
+    };
+    const cleanTaskText = (raw: string): string =>
+      raw.replace(/\s+/g, ' ').replace(/^\$\s*/, '').trim();
+
+    const toolbarBackgroundJobs = container.querySelectorAll('.composer-toolbar-background-job-item');
+    for (const job of Array.from(toolbarBackgroundJobs)) {
+      const stopEl = job.querySelector('.composer-toolbar-background-job-item-stop, [class*="background-job"][class*="stop"]');
+      if (!stopEl) continue;
+      const label = cleanTaskText(
+        job.querySelector('.composer-toolbar-background-job-item-text')?.textContent ||
+        job.textContent?.replace(/\bStop\b/gi, '') ||
+        ''
+      ).substring(0, 120) || 'Background terminal';
+      const id = job.getAttribute('data-tool-call-id') || buildSelectorPath(job);
+
+      seenBackgroundCards.add(job);
+      backgroundTasks.push({
+        id: `background:${id}`,
+        label,
+        stopSelectorPath: buildSelectorPath(stopEl),
+      });
+    }
+
+    const backgroundStopButtons = Array.from(container.querySelectorAll('button')) as HTMLButtonElement[];
+    for (const stopBtn of backgroundStopButtons) {
+      const stopLabel = `${getButtonLabel(stopBtn)} ${stopBtn.getAttribute('aria-label') || ''} ${stopBtn.getAttribute('title') || ''}`.trim();
+      if (!stopLabelRe.test(stopLabel)) continue;
+
+      const card =
+        stopBtn.closest('.ui-shell-tool-call') ||
+        stopBtn.closest('.ui-tool-call-card') ||
+        stopBtn.closest('[class*="background"]') ||
+        stopBtn.parentElement;
+      if (!card || seenBackgroundCards.has(card)) continue;
+
+      const inTranscript = !!stopBtn.closest('[data-flat-index]');
+      const isStoppableShellCall =
+        stopBtn.classList.contains('ui-shell-tool-call__glass-stop') ||
+        !!stopBtn.closest('.ui-shell-tool-call--with-stop') ||
+        !!card.querySelector('.ui-shell-tool-call__command');
+      if (inTranscript && !isStoppableShellCall) continue;
+
+      const commandEl =
+        card.querySelector('.ui-shell-tool-call__command') ||
+        card.querySelector('.composer-terminal-command-expanded-text') ||
+        card.querySelector('.composer-terminal-command-editor') ||
+        card.querySelector('.composer-terminal-command-wrapper') ||
+        card.querySelector('.composer-tool-call-header-content');
+      const descEl =
+        card.querySelector('.ui-shell-tool-call__description') ||
+        card.querySelector('.composer-terminal-top-header-description');
+      const cardText = cleanTaskText(card.textContent || '');
+      const label = cleanTaskText(commandEl?.textContent || descEl?.textContent || cardText.replace(/\bStop\b/gi, ''))
+        .substring(0, 120) || 'Background task';
+      const detail = cleanTaskText(descEl?.textContent || '')
+        .substring(0, 160) || undefined;
+      const id = card.getAttribute('data-tool-call-id') || buildSelectorPath(card);
+
+      seenBackgroundCards.add(card);
+      backgroundTasks.push({
+        id: `background:${id}`,
+        label,
+        ...(detail && detail !== label ? { detail } : {}),
+        stopSelectorPath: buildSelectorPath(stopBtn),
+      });
+    }
+    const agentStopButton = findStopButton(container);
+    const agentStopSelectorPath = agentStopButton
+      ? buildSelectorPath(agentStopButton)
+      : (backgroundTasks.find((task) => task.stopSelectorPath)?.stopSelectorPath ?? '');
+
     // --- Agent status ---
     const statusEl = findFirst(statusSelectors);
     let agentStatus: CursorState['agentStatus'] = 'idle';
@@ -1892,6 +1981,8 @@ export function extractionFunction(
       activeWindowId: '',
       composerQueue: { items: queueItems, ...(queueLabel ? { queueLabel } : {}) },
       questionnaire,
+      backgroundTasks,
+      agentStopSelectorPath,
       _rawSignals,
     };
   } catch {
@@ -1945,6 +2036,10 @@ export class DOMExtractor {
 
   setClient(client: CdpClient | null): void {
     this.client = client;
+  }
+
+  requestPoll(delayMs = 0): void {
+    this.scheduleNextPoll(delayMs);
   }
 
   private scheduleNextPoll(delayMs = this.currentPollIntervalMs): void {

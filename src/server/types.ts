@@ -75,6 +75,13 @@ export interface Questionnaire {
   continueDisabled: boolean;
 }
 
+export interface BackgroundTask {
+  id: string;
+  label: string;
+  detail?: string;
+  stopSelectorPath?: string;
+}
+
 export interface CursorState {
   connected: boolean;
   /** Health of DOM extraction independent from the CDP websocket connection. */
@@ -108,6 +115,10 @@ export interface CursorState {
   composerQueue: ComposerQueueState;
   /** Agent questionnaire widget (multiple-choice questions). */
   questionnaire: Questionnaire | null;
+  /** Background shell/tool tasks visible in Cursor's composer. */
+  backgroundTasks: BackgroundTask[];
+  /** Best-known stop/cancel action for the active agent, if Cursor exposes one. */
+  agentStopSelectorPath: string;
   _rawSignals?: RawSignals;
 }
 

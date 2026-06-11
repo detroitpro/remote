@@ -125,6 +125,47 @@ header {
   animation: statusShimmer 2.2s ease-in-out infinite;
 }
 
+.agent-stop-btn {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.agent-stop-btn span {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: currentColor;
+}
+
+.agent-stop-btn:not(:disabled) {
+  background: rgba(228, 228, 228, 0.10);
+  border-color: rgba(228, 228, 228, 0.06);
+  color: rgba(228, 228, 228, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.16);
+}
+
+.agent-stop-btn:not(:disabled):active {
+  background: rgba(228, 228, 228, 0.14);
+  color: rgba(228, 228, 228, 0.92);
+}
+
+.agent-stop-btn:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
 @keyframes statusShimmer {
   0% { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
@@ -682,6 +723,22 @@ header {
   font-size: 12px;
   width: 14px;
   text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tool-spinner {
+  box-sizing: border-box;
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1.5px solid var(--text-quaternary);
+  border-top-color: var(--text-secondary);
+  transform-origin: center;
+  animation: tab-status-spin 4.5s linear infinite;
 }
 
 .tool-action {
@@ -1905,13 +1962,13 @@ header {
 
 .tab-item .tab-status.running {
   box-sizing: border-box;
-  width: 7px;
-  height: 7px;
+  width: 9px;
+  height: 9px;
   background: transparent;
   border: 1.5px solid var(--text-quaternary);
   border-top-color: var(--text-secondary);
   transform-origin: center;
-  animation: tab-status-spin 9s linear infinite;
+  animation: tab-status-spin 6.4s linear infinite;
 }
 
 .tab-status.completed { background: var(--accent-green); }
@@ -1950,6 +2007,7 @@ header {
   display: flex;
   gap: 6px;
   margin-bottom: 6px;
+  align-items: center;
 }
 
 .pill {
@@ -1980,6 +2038,80 @@ header {
   font-size: 8px;
   opacity: 0.5;
   line-height: 1;
+}
+
+.background-task-pill {
+  margin-left: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 7px;
+  min-height: 20px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.background-task-pill:active {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.background-task-sheet-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.background-task-sheet-item:last-child {
+  border-bottom: none;
+}
+
+.background-task-sheet-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.background-task-sheet-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+.background-task-sheet-detail {
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.background-task-stop {
+  flex-shrink: 0;
+  border: 1px solid rgba(227, 70, 113, 0.45);
+  border-radius: 999px;
+  background: rgba(227, 70, 113, 0.10);
+  color: var(--accent-red);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.background-task-no-action {
+  flex-shrink: 0;
+  color: var(--text-quaternary);
+  font-size: 11px;
 }
 
 /* --- Bottom Sheet --- */

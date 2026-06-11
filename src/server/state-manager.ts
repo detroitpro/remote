@@ -26,6 +26,8 @@ function emptyState(): CursorState {
     activeWindowId: '',
     composerQueue: { items: [] },
     questionnaire: null,
+    backgroundTasks: [],
+    agentStopSelectorPath: '',
   };
 }
 
@@ -374,6 +376,16 @@ export class StateManager extends EventEmitter {
 
     if (JSON.stringify(prev.questionnaire) !== JSON.stringify(next.questionnaire)) {
       patch.questionnaire = next.questionnaire;
+      hasChange = true;
+    }
+
+    if (JSON.stringify(prev.backgroundTasks) !== JSON.stringify(next.backgroundTasks)) {
+      patch.backgroundTasks = next.backgroundTasks;
+      hasChange = true;
+    }
+
+    if (prev.agentStopSelectorPath !== next.agentStopSelectorPath) {
+      patch.agentStopSelectorPath = next.agentStopSelectorPath;
       hasChange = true;
     }
 
