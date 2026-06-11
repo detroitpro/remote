@@ -102,6 +102,8 @@ export interface CursorState {
   _rawSignals?: RawSignals;
 }
 
+export type ChatTabWorkStatus = 'running' | 'completed' | 'idle';
+
 export interface ChatTab {
   composerId: string;
   title: string;
@@ -110,6 +112,8 @@ export interface ChatTab {
   selectorPath: string;
   /** `open` = editor tab bar; `sidebar` = agent list in the sidebar. */
   source: 'open' | 'sidebar';
+  /** Agent work state mirrored from Cursor sidebar / composer DOM. */
+  workStatus: ChatTabWorkStatus;
 }
 
 export interface ModeInfo {

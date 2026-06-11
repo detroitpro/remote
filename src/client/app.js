@@ -1748,7 +1748,14 @@
     const btn = document.createElement('button');
     btn.className = 'tab-item' + (tab.isActive ? ' active' : '');
     btn.dataset.key = tabItemKey(tab);
-    btn.textContent = tab.title || `Chat ${index + 1}`;
+    const ws = tab.workStatus;
+    if (ws === 'running' || ws === 'completed') {
+      const dot = document.createElement('span');
+      dot.className = 'tab-status ' + ws;
+      dot.setAttribute('aria-hidden', 'true');
+      btn.appendChild(dot);
+    }
+    btn.appendChild(document.createTextNode(tab.title || `Chat ${index + 1}`));
     btn.addEventListener('click', () => emitSwitchTab(tab));
     bindTabContextMenu(btn, tab);
     return btn;

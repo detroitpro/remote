@@ -1339,6 +1339,53 @@ export function extractionFunction(
       return t.trim().substring(0, 120);
     }
 
+    const hiddenSidebarTabTitles = new Set(['automations', 'customize']);
+
+    function isHiddenSidebarTab(title: string): boolean {
+      const base = cleanTabTitle(title).toLowerCase();
+      if (hiddenSidebarTabTitles.has(base)) return true;
+      const slash = base.lastIndexOf(' / ');
+      if (slash >= 0) return hiddenSidebarTabTitles.has(base.slice(slash + 3));
+      return false;
+    }
+
+    function deriveWorkStatusFromSidebarCell(cell: Element): ChatTab['workStatus'] {
+      const iconDefault = cell.querySelector('.agent-sidebar-cell-icon-default');
+      if (iconDefault?.querySelector('.spinning-loader')) return 'running';
+      if (cell.getAttribute('data-has-subtitle') === 'true') return 'completed';
+      return 'idle';
+    }
+
+    function deriveWorkStatusFromGlassBtn(btn: Element): ChatTab['workStatus'] {
+      if (btn.querySelector('.spinning-loader')) return 'running';
+      return 'idle';
+    }
+
+    function deriveWorkStatusFromComposer(composerId: string): ChatTab['workStatus'] {
+      if (!composerId || /^open:|^tab-|^glass:/.test(composerId)) return 'idle';
+      const els = document.querySelectorAll(`[data-composer-id="${composerId}"]`);
+      for (const el of Array.from(els)) {
+        const s = (el.getAttribute('data-composer-status') || '').toLowerCase();
+        if (s && s !== 'idle' && s !== 'completed' && s !== 'done') return 'running';
+      }
+      return 'idle';
+    }
+
+    function syncOpenTabWorkStatus(tabs: ChatTab[]): void {
+      const byTitle = new Map<string, ChatTab['workStatus']>();
+      for (const t of tabs) {
+        if (t.source === 'sidebar') byTitle.set(t.title.toLowerCase(), t.workStatus);
+      }
+      for (const t of tabs) {
+        if (t.source !== 'open') continue;
+        if (deriveWorkStatusFromComposer(t.composerId) === 'running') {
+          t.workStatus = 'running';
+          continue;
+        }
+        t.workStatus = byTitle.get(t.title.toLowerCase()) ?? t.workStatus;
+      }
+    }
+
     function markSidebarActiveByComposer(tabs: ChatTab[]): void {
       if (!containerComposerId) return;
       let matched = false;
@@ -1383,6 +1430,7 @@ export function extractionFunction(
           status: isActive ? 'active' : 'idle',
           selectorPath: buildSelectorPath(tab),
           source: 'open',
+          workStatus: deriveWorkStatusFromComposer(resourceId),
         });
       }
 
@@ -1435,6 +1483,7 @@ export function extractionFunction(
             }
           }
 
+          if (isHiddenSidebarTab(displayTitle)) continue;
           if (seenTitles.has(displayTitle)) continue;
           seenTitles.add(displayTitle);
 
@@ -1452,6 +1501,7 @@ export function extractionFunction(
             status: isActive ? 'active' : 'idle',
             selectorPath: buildSelectorPath(tab),
             source: 'sidebar',
+            workStatus: deriveWorkStatusFromGlassBtn(tab),
           });
         }
 
@@ -1475,7 +1525,7 @@ export function extractionFunction(
             ? (titleEl.textContent || '').trim()
             : (tab.getAttribute('aria-label') || tab.textContent || '').trim();
           const title = cleanTabTitle(rawTitle);
-          if (!title || seenTitles.has(title)) continue;
+          if (!title || isHiddenSidebarTab(title) || seenTitles.has(title)) continue;
           seenTitles.add(title);
 
           const composerId = tab.getAttribute('data-composer-id')
@@ -1495,6 +1545,7 @@ export function extractionFunction(
             status: isActive ? 'active' : 'idle',
             selectorPath: buildSelectorPath(tab),
             source: 'sidebar',
+            workStatus: deriveWorkStatusFromSidebarCell(tab),
           });
         }
         if (chatTabs.some((t) => t.source === 'sidebar')) {
@@ -1502,6 +1553,8 @@ export function extractionFunction(
           break;
         }
       }
+
+      syncOpenTabWorkStatus(chatTabs);
     } catch { /* skip */ }
 
     // --- Mode extraction ---
