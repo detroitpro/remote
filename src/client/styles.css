@@ -68,9 +68,10 @@ html, body {
 /* --- Header --- */
 
 header {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   height: var(--header-height);
   padding: 0 14px;
   background: var(--bg-secondary);
@@ -85,6 +86,44 @@ header {
   gap: 6px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.header-left {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding-right: 72px;
+}
+
+.header-right {
+  position: absolute;
+  top: 0;
+  right: 14px;
+  height: 100%;
+  z-index: 2;
+  flex-shrink: 0;
+  padding-left: 14px;
+  background: var(--bg-secondary);
+  box-shadow: -10px 0 12px var(--bg-secondary);
+}
+
+.header-right::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  background: linear-gradient(to right, transparent, var(--bg-secondary));
+  pointer-events: none;
+}
+
+.header-left #connection-text {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-right.header-right-hidden {
@@ -1379,8 +1418,8 @@ header {
 /* --- Approval Bar --- */
 
 .approval-bar {
-  padding: 10px 14px;
-  background: var(--bg-secondary);
+  padding: 10px 14px 12px;
+  background: var(--bg-primary);
   border-top: 1px solid var(--border-color);
   flex-shrink: 0;
   z-index: 10;
@@ -1388,14 +1427,73 @@ header {
 
 .approval-bar.hidden { display: none; }
 
-.approval-desc {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-  text-align: center;
+.approval-card {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(228, 228, 228, 0.03);
+  overflow: hidden;
 }
 
-.approval-actions { display: flex; gap: 10px; }
+.approval-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.approval-card-icon {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.approval-card-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.approval-command-block {
+  margin: 0;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.35);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.approval-command-prompt {
+  color: var(--accent-green);
+  user-select: none;
+}
+
+.approval-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  justify-content: flex-end;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.approval-actions .btn-approve,
+.approval-actions .btn-reject {
+  flex: 0 1 auto;
+  min-width: 96px;
+  height: 36px;
+  font-size: 12px;
+}
 
 /* --- Questionnaire Bar --- */
 
@@ -2010,6 +2108,14 @@ header {
   align-items: center;
 }
 
+.mode-model-bar-counts {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .pill {
   display: flex;
   align-items: center;
@@ -2042,23 +2148,39 @@ header {
 
 .git-status-pill,
 .background-task-pill {
-  margin-left: auto;
   border: 1px solid var(--border-color);
   border-radius: 999px;
   background: transparent;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1;
   padding: 3px 7px;
   min-height: 20px;
   cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 
+.git-status-pill {
+  min-width: calc(4ch + 14px);
+}
+
 .background-task-pill {
-  margin-left: 0;
+  min-width: calc(3ch + 14px);
+}
+
+.count-pill-idle {
+  opacity: 0.42;
+  color: var(--text-tertiary);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+.count-pill-idle:active {
+  opacity: 0.55;
 }
 
 .git-status-pill:active,
@@ -2094,6 +2216,12 @@ header {
   line-height: 1;
   padding: 2px 6px;
   cursor: pointer;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: min(180px, 42vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .server-version-badge:active {

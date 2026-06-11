@@ -610,8 +610,10 @@ describe('web: background tasks', () => {
       ],
     });
 
-    const pill = env.document.getElementById('pill-background-tasks');
-    assert.equal(pill, null);
+    const pill = env.document.getElementById('pill-background-tasks') as HTMLButtonElement;
+    assert.ok(pill, 'Expected background pill to stay reserved');
+    assert.equal(pill.textContent, 'B:0');
+    assert.ok(pill.classList.contains('count-pill-idle'));
   });
 });
 
@@ -694,6 +696,7 @@ describe('web: git status', () => {
     const pill = env.document.getElementById('pill-git-status') as HTMLButtonElement;
     assert.ok(pill, 'Expected git status pill to be rendered');
     assert.equal(pill.textContent, 'F:0');
+    assert.ok(pill.classList.contains('count-pill-idle'));
   });
 });
 

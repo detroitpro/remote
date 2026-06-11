@@ -227,6 +227,7 @@
   },
   "scripts": {
     "dev": "tsx scripts/dev-wrapper.ts",
+    "dev:gui": "vite --config vite.config.ts",
     "build": "tsc && vite build",
     "build:ext": "node extension/esbuild.js --production",
     "watch:ext": "node extension/esbuild.js --watch",
