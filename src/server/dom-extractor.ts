@@ -1749,7 +1749,7 @@ export function extractionFunction(
       orphanIndicators: _orphanIndicators,
     };
 
-    const queueItems: { id: string; text: string }[] = [];
+    const queueItems: CursorState['composerQueue']['items'] = [];
     let queueLabel: string | undefined;
     const toolbarSection = document.querySelector('#composer-toolbar-section');
     if (toolbarSection) {
@@ -1765,6 +1765,22 @@ export function extractionFunction(
         const t0 = (fb?.textContent || '').trim();
         if (t0) queueLabel = t0;
       }
+      const queueActionLabels: Record<string, string> = {
+        send: 'Send now',
+        remove: 'Remove',
+        edit: 'Edit',
+      };
+      function queueActionSelector(item: Element, action: string): string {
+        const qid = item.getAttribute('data-queue-item-id');
+        if (qid) {
+          return `.composer-toolbar-queue-item[data-queue-item-id="${qid}"] [data-queue-action="${action}"] .anysphere-icon-button`;
+        }
+        const target =
+          item.querySelector(`[data-queue-action="${action}"] .anysphere-icon-button`) ||
+          item.querySelector(`[data-queue-action="${action}"]`);
+        return target ? buildSelectorPath(target) : '';
+      }
+
       for (const item of Array.from(toolbarSection.querySelectorAll('.composer-toolbar-queue-item'))) {
         const qid = item.getAttribute('data-queue-item-id') || '';
         let qtext = (item.getAttribute('data-queue-item-query') || '').trim();
@@ -1772,7 +1788,25 @@ export function extractionFunction(
           const ro = item.querySelector('.aislash-editor-input-readonly');
           qtext = (ro?.textContent || '').trim();
         }
-        if (qid || qtext) queueItems.push({ id: qid || `qi-${queueItems.length}`, text: qtext });
+        const actions: { type: 'send' | 'remove' | 'edit'; label: string; selectorPath: string }[] = [];
+        for (const actionEl of Array.from(item.querySelectorAll('[data-queue-action]'))) {
+          const kind = actionEl.getAttribute('data-queue-action') || '';
+          if (kind !== 'send' && kind !== 'remove' && kind !== 'edit') continue;
+          const selectorPath = queueActionSelector(item, kind);
+          if (!selectorPath) continue;
+          actions.push({
+            type: kind,
+            label: queueActionLabels[kind] || kind,
+            selectorPath,
+          });
+        }
+        if (qid || qtext) {
+          queueItems.push({
+            id: qid || `qi-${queueItems.length}`,
+            text: qtext,
+            actions: actions.length > 0 ? actions : undefined,
+          });
+        }
       }
     }
 

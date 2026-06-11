@@ -32,9 +32,18 @@ export interface RawSignals {
   orphanIndicators: Array<{ cls: string; text: string; parentCls: string }>;
 }
 
+export type ComposerQueueActionType = 'send' | 'remove' | 'edit';
+
+export interface ComposerQueueAction {
+  type: ComposerQueueActionType;
+  label: string;
+  selectorPath: string;
+}
+
 export interface ComposerQueueItem {
   id: string;
   text: string;
+  actions?: ComposerQueueAction[];
 }
 
 export interface ComposerQueueState {

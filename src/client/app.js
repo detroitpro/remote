@@ -162,6 +162,9 @@
   const $sheetTab = document.getElementById('sheet-tab');
   const $sheetTabHeader = document.getElementById('sheet-tab-header');
   const $sheetTabList = document.getElementById('sheet-tab-list');
+  const $sheetQueue = document.getElementById('sheet-queue');
+  const $sheetQueueHeader = document.getElementById('sheet-queue-header');
+  const $sheetQueueList = document.getElementById('sheet-queue-list');
   const $planModalOverlay = document.getElementById('plan-modal-overlay');
   const $planModalLabel = document.getElementById('plan-modal-label');
   const $planModalTitle = document.getElementById('plan-modal-title');
@@ -465,6 +468,86 @@
     else $statusText.style.color = '';
   }
 
+  const QUEUE_ACTION_LABELS = {
+    send: 'Odeslat hned',
+    remove: 'Smazat',
+    edit: 'Upravit',
+  };
+
+  let activeSheet = null;
+  let queueSheetItem = null;
+  let queueLongPressTimer = null;
+
+  function emitQueueAction(action) {
+    if (!action || !action.selectorPath) return;
+    socket.emit('command:click_action', {
+      commandId: newCommandId(),
+      selectorPath: action.selectorPath,
+    });
+  }
+
+  function openQueueSheet(item) {
+    queueSheetItem = item;
+    closeSheet();
+    activeSheet = 'queue';
+    $sheetOverlay.classList.remove('hidden');
+    $sheetQueue.classList.remove('hidden');
+    $sheetQueueHeader.textContent = item.text || 'Fronta';
+    $sheetQueueList.replaceChildren();
+
+    const actions = (item.actions || []).filter((a) => a && a.selectorPath);
+    if (actions.length === 0) {
+      const hint = document.createElement('p');
+      hint.className = 'sheet-tab-hint';
+      hint.textContent = 'Pro tuto položku nejsou dostupné žádné akce.';
+      $sheetQueueList.appendChild(hint);
+      return;
+    }
+
+    const order = ['send', 'edit', 'remove'];
+    const sorted = actions.slice().sort((a, b) => {
+      const ai = order.indexOf(a.type);
+      const bi = order.indexOf(b.type);
+      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+    });
+
+    for (const action of sorted) {
+      const btn = document.createElement('button');
+      btn.className = 'sheet-item' + (action.type === 'remove' ? ' sheet-item-danger' : '');
+      const label = QUEUE_ACTION_LABELS[action.type] || action.label || action.type;
+      const icon = action.type === 'send' ? '↑' : action.type === 'remove' ? '×' : '✎';
+      btn.innerHTML = '<span class="sheet-item-icon">' + icon + '</span><span>' + escapeHtml(label) + '</span>';
+      btn.addEventListener('click', () => {
+        emitQueueAction(action);
+        closeSheet();
+        showToast(label + '…', 'success');
+      });
+      $sheetQueueList.appendChild(btn);
+    }
+  }
+
+  function bindQueueContextMenu(row, item) {
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openQueueSheet(item);
+    });
+
+    row.addEventListener('touchstart', () => {
+      clearTimeout(queueLongPressTimer);
+      queueLongPressTimer = setTimeout(() => {
+        if (navigator.vibrate) navigator.vibrate(20);
+        openQueueSheet(item);
+      }, 500);
+    }, { passive: true });
+
+    const cancelLongPress = () => clearTimeout(queueLongPressTimer);
+    row.addEventListener('touchend', cancelLongPress);
+    row.addEventListener('touchmove', cancelLongPress);
+    row.addEventListener('touchcancel', cancelLongPress);
+
+    row.addEventListener('click', () => openQueueSheet(item));
+  }
+
   function renderComposerQueue() {
     const bar = document.getElementById('composer-queue-bar');
     const labelEl = document.getElementById('composer-queue-label');
@@ -476,14 +559,17 @@
     if (q.items.length === 0) {
       bar.classList.add('hidden');
       itemsEl.innerHTML = '';
+      if (activeSheet === 'queue') closeSheet();
       return;
     }
     bar.classList.remove('hidden');
     labelEl.textContent = q.queueLabel || `${q.items.length} queued`;
     itemsEl.innerHTML = '';
     q.items.forEach((it) => {
-      const row = document.createElement('div');
+      const row = document.createElement('button');
+      row.type = 'button';
       row.className = 'composer-queue-row';
+      row.dataset.id = it.id || '';
       const dot = document.createElement('span');
       dot.className = 'composer-queue-dot';
       const tx = document.createElement('span');
@@ -491,6 +577,14 @@
       tx.textContent = it.text || '';
       row.appendChild(dot);
       row.appendChild(tx);
+      if (it.actions && it.actions.length > 0) {
+        const hint = document.createElement('span');
+        hint.className = 'composer-queue-menu-hint';
+        hint.setAttribute('aria-hidden', 'true');
+        hint.textContent = '⋯';
+        row.appendChild(hint);
+        bindQueueContextMenu(row, it);
+      }
       itemsEl.appendChild(row);
     });
   }
@@ -1908,8 +2002,6 @@
 
   // --- Bottom sheet logic ---
 
-  let activeSheet = null;
-
   function openSheet(type) {
     closeSheet();
     activeSheet = type;
@@ -1945,8 +2037,10 @@
     $sheetModel.classList.add('hidden');
     $sheetPlanModel.classList.add('hidden');
     $sheetTab.classList.add('hidden');
+    if ($sheetQueue) $sheetQueue.classList.add('hidden');
     activeSheet = null;
     tabSheetTab = null;
+    queueSheetItem = null;
   }
 
   function renderModeSheet() {
