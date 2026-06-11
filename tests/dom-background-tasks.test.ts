@@ -30,7 +30,7 @@ function withDom<T>(html: string, fn: () => T): T {
 
 describe('dom extractor: background tasks', () => {
   it('uses Cursor composer stop control as the agent stop target', () => {
-    let resolvedStopButton: Element | null = null;
+    let resolvedStopButtonAttr: string | null = null;
     const state = withDom(`
       <div id="container">
         <div class="button-container composer-button-area">
@@ -64,19 +64,21 @@ describe('dom extractor: background tasks', () => {
         []
       );
       if (extracted?.agentStopSelectorPath) {
-        resolvedStopButton = document.querySelector(extracted.agentStopSelectorPath);
+        resolvedStopButtonAttr = document
+          .querySelector(extracted.agentStopSelectorPath)
+          ?.getAttribute('data-stop-button') ?? null;
       }
       return extracted;
     });
 
     assert.ok(state);
     assert.equal(state.backgroundTasks.length, 0);
-    assert.equal(resolvedStopButton?.getAttribute('data-stop-button'), 'true');
+    assert.equal(resolvedStopButtonAttr, 'true');
     assert.equal(state.agentStatus, 'generating');
   });
 
   it('uses Cursor composer stop control outside the transcript container', () => {
-    let resolvedStopButton: Element | null = null;
+    let resolvedStopButtonAttr: string | null = null;
     const state = withDom(`
       <div id="container">
         <div data-flat-index="1">
@@ -106,13 +108,15 @@ describe('dom extractor: background tasks', () => {
         []
       );
       if (extracted?.agentStopSelectorPath) {
-        resolvedStopButton = document.querySelector(extracted.agentStopSelectorPath);
+        resolvedStopButtonAttr = document
+          .querySelector(extracted.agentStopSelectorPath)
+          ?.getAttribute('data-stop-button') ?? null;
       }
       return extracted;
     });
 
     assert.ok(state);
-    assert.equal(resolvedStopButton?.getAttribute('data-stop-button'), 'true');
+    assert.equal(resolvedStopButtonAttr, 'true');
     assert.equal(state.agentStatus, 'generating');
   });
 
