@@ -1,4 +1,4 @@
-import type { GitStatusInfo } from './extension-bridge.js';
+import type { GitStatusInfo, GitWindowSnapshot } from './extension-bridge.js';
 
 export interface ServerIdentity {
   version: string;
@@ -30,6 +30,7 @@ export interface GitBridgeDebugInfo {
   updatedAt: number;
   extensionVersion: string;
   windowName: string;
+  windowKey?: string;
   isOwner: boolean;
   gitApiAvailable: boolean;
   repoCount: number;
@@ -38,12 +39,27 @@ export interface GitBridgeDebugInfo {
   changedCount?: number;
   repoBreakdown?: GitBridgeRepoDebugInfo[];
   runGitStatus: boolean;
+  lastPushAt?: number;
+  lastPushOk?: boolean;
+  lastPushError?: string;
   lastError?: string;
+}
+
+export interface GitSnapshotStoreDiagnostics {
+  activeWindowKey: string | null;
+  activeWindowTitle: string | null;
+  lastPushAt: number | null;
+  lastPushWindowKey: string | null;
+  windowSnapshots: Record<string, Pick<GitWindowSnapshot, 'windowKey' | 'updatedAt' | 'repoBreakdown'> & {
+    changedCount: number;
+    repoLabel?: string;
+  }>;
 }
 
 export interface ServerDiagnostics {
   server: ServerIdentity;
   extensionBridge: ExtensionBridgeDiagnostics;
+  gitSnapshots: GitSnapshotStoreDiagnostics;
   gitStatus: GitStatusInfo | null;
   connected: boolean;
   generation: number;

@@ -1454,6 +1454,17 @@ function DebugSheet({
   const rows = useMemo(() => {
     const bridge = details?.extensionBridge as Record<string, unknown> | undefined;
     const bridgeDebug = bridge?.gitBridgeDebug as Record<string, unknown> | undefined;
+    const gitSnapshots = details?.gitSnapshots as Record<string, unknown> | undefined;
+    const snapshotEntries = gitSnapshots?.windowSnapshots as Record<string, {
+      changedCount: number;
+      updatedAt: number;
+      repoBreakdown?: Array<{ label: string; changedCount: number }>;
+    }> | undefined;
+    const snapshotSummary = snapshotEntries
+      ? Object.entries(snapshotEntries)
+        .map(([key, snap]) => `${key}:F:${snap.changedCount}`)
+        .join(', ')
+      : '—';
     const server = (details?.server ?? serverHealth?.server) as Record<string, unknown> | undefined;
     const repoBreakdown = Array.isArray(bridgeDebug?.repoBreakdown)
       ? bridgeDebug.repoBreakdown.map((repo: any) => `${repo.label}:${repo.changedCount}`).join(', ')
@@ -1468,15 +1479,23 @@ function DebugSheet({
       ['Data dir', server?.dataDirName ?? bridge?.dataDirName ?? '—'],
       ['Client build', server?.clientBuild ?? '—'],
       ['CDP URL', details?.cdpUrl ?? '—'],
+      ['Active window title', details?.activeWindowTitle ?? '—'],
+      ['Active git window key', gitSnapshots?.activeWindowKey ?? '—'],
+      ['Git snapshots', snapshotSummary],
+      ['Last git push', gitSnapshots?.lastPushAt ? new Date(Number(gitSnapshots.lastPushAt)).toLocaleString() : '—'],
+      ['Last push window key', gitSnapshots?.lastPushWindowKey ?? '—'],
       ['State gitStatus', state.gitStatus ? `F:${state.gitStatus.changedCount}` : 'null'],
       ['Bridge git file', bridge?.gitStatusFileExists ? 'yes' : 'no'],
       ['Bridge git raw', bridge?.gitStatusRaw ?? '—'],
       ['Git bridge window', bridgeDebug?.windowName ?? '—'],
+      ['Git bridge key', bridgeDebug?.windowKey ?? '—'],
       ['Git bridge owner', bridgeDebug?.isOwner == null ? '—' : String(bridgeDebug.isOwner)],
       ['Git bridge repos', bridgeDebug?.repoCount ?? '—'],
       ['Git bridge resolved', bridgeDebug?.repoResolved == null ? '—' : String(bridgeDebug.repoResolved)],
       ['Git repo breakdown', repoBreakdown],
       ['Git bridge count', bridgeDebug?.changedCount ?? '—'],
+      ['Git push ok', bridgeDebug?.lastPushOk == null ? '—' : String(bridgeDebug.lastPushOk)],
+      ['Git push error', bridgeDebug?.lastPushError ?? '—'],
       ['Git bridge error', bridgeDebug?.lastError ?? '—'],
       ['Generation', details?.generation ?? serverHealth?.generation ?? '—'],
       ['Uptime', details?.uptime ?? serverHealth?.uptime ?? '—'],

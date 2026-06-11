@@ -112,6 +112,11 @@ export class ServerManager extends EventEmitter {
     return { port, host, url: `http://${displayHost}:${port}/health` };
   }
 
+  getGitSnapshotPushUrl(): string {
+    const { url } = this.getHealthUrl();
+    return url.replace('/health', '/internal/git-snapshot');
+  }
+
   private async probeExistingServer(): Promise<boolean> {
     const { url } = this.getHealthUrl();
     try {

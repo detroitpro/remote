@@ -714,6 +714,20 @@ describe('web: debug panel', () => {
         clientBuild: 'vite-dev',
       },
       gitStatus: null,
+      gitSnapshots: {
+        activeWindowKey: 'cursor-ide-remote',
+        activeWindowTitle: 'cursor-ide-remote',
+        lastPushAt: Date.now(),
+        lastPushWindowKey: 'cursor-ide-remote',
+        windowSnapshots: {
+          'cursor-ide-remote': {
+            windowKey: 'cursor-ide-remote',
+            changedCount: 36,
+            updatedAt: Date.now(),
+            repoBreakdown: [{ rootUri: 'file:///a', label: 'a', changedCount: 20 }],
+          },
+        },
+      },
       generation: 1,
       uptime: 5,
       clients: 1,

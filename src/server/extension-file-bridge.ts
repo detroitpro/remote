@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, watch, type FSWatcher, writeFileSync } from 'fs';
 import { basename } from 'path';
 import type { StateManager } from './state-manager.js';
-import type { GitStatusInfo, OpenSourceControlRequest, OpenSourceControlResult } from '../shared/extension-bridge.js';
+import type { GitSnapshotPushPayload, GitStatusInfo, OpenSourceControlRequest, OpenSourceControlResult } from '../shared/extension-bridge.js';
 import type { ExtensionBridgeDiagnostics, GitBridgeDebugInfo } from '../shared/diagnostics.js';
 import {
   gitBridgeDebugPath,
@@ -121,6 +121,14 @@ export class ExtensionFileBridge {
       if (!raw || raw === this.lastGitStatusRaw) return;
       const parsed = JSON.parse(raw) as GitStatusInfo | null;
       this.lastGitStatusRaw = raw;
+      if (parsed?.windowKey) {
+        this.stateManager.upsertGitWindowSnapshot({
+          windowKey: parsed.windowKey,
+          gitStatus: parsed,
+          updatedAt: parsed.updatedAt,
+        });
+        return;
+      }
       this.stateManager.updateGitStatus(parsed);
     } catch (err) {
       console.warn(`[extension-bridge] Failed to read git status: ${err instanceof Error ? err.message : String(err)}`);

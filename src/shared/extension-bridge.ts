@@ -1,4 +1,5 @@
 import { join } from 'path';
+import type { GitBridgeRepoDebugInfo } from './diagnostics.js';
 
 export interface GitStatusInfo {
   available: boolean;
@@ -6,7 +7,27 @@ export interface GitStatusInfo {
   repoLabel?: string;
   updatedAt: number;
   source: 'vscode.git';
+  /** Workspace identity this snapshot belongs to (per-window git). */
+  windowKey?: string;
 }
+
+export interface GitWindowSnapshot {
+  windowKey: string;
+  gitStatus: GitStatusInfo;
+  repoBreakdown?: GitBridgeRepoDebugInfo[];
+  updatedAt: number;
+  extensionInstanceId?: string;
+}
+
+export interface GitSnapshotPushPayload {
+  windowKey: string;
+  gitStatus: GitStatusInfo;
+  repoBreakdown?: GitBridgeRepoDebugInfo[];
+  updatedAt: number;
+  extensionInstanceId?: string;
+}
+
+export const GIT_SNAPSHOT_PUSH_PATH = '/internal/git-snapshot';
 
 export interface OpenSourceControlRequest {
   requestId: string;

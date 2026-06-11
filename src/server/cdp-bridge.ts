@@ -1,6 +1,9 @@
 import { EventEmitter } from 'events';
 import { CdpClient } from './cdp-client.js';
 import type { ServerConfig, CursorWindow } from './types.js';
+import { resolveWorkspaceIdentity, authorityToQualifier } from '../shared/workspace-identity.js';
+
+export { authorityToQualifier };
 
 interface CDPTarget {
   id: string;
@@ -30,10 +33,11 @@ export async function extractWorkspaceName(client: CdpClient, includeQualifier =
     if (!raw || typeof raw !== 'string') return null;
     const { path, authority } = JSON.parse(raw) as { path: string; authority: string };
     if (!path) return null;
-    const basename = path.split('/').filter(Boolean).pop() || path;
-    if (!includeQualifier) return basename;
-    const qualifier = authorityToQualifier(authority);
-    return qualifier ? `${basename} ${qualifier}` : basename;
+    return resolveWorkspaceIdentity({
+      workspacePath: path,
+      authority,
+      includeQualifier,
+    });
   } catch {
     return null;
   }
@@ -53,23 +57,6 @@ export function parseCdpTitle(raw: string): string {
     title = dashParts[dashParts.length - 1];
   }
   return title.trim();
-}
-
-function authorityToQualifier(authority: string): string {
-  if (!authority) return '';
-  if (authority.startsWith('wsl+')) {
-    return `[WSL: ${authority.slice(4)}]`;
-  }
-  if (authority.startsWith('ssh-remote+')) {
-    const hex = authority.slice('ssh-remote+'.length);
-    try {
-      const decoded = JSON.parse(Buffer.from(hex, 'hex').toString('utf8')) as { hostName?: string };
-      return decoded.hostName ? `[SSH: ${decoded.hostName}]` : `[SSH]`;
-    } catch {
-      return `[SSH: ${hex.substring(0, 16)}]`;
-    }
-  }
-  return `[${authority}]`;
 }
 
 export class CDPBridge extends EventEmitter {

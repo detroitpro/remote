@@ -1,12 +1,12 @@
 import express from 'express';
 import { createServer } from 'http';
+import { createRequire } from 'module';
 import { Server as SocketServer, type Socket } from 'socket.io';
 import { fileURLToPath } from 'url';
 import { basename, dirname, join, resolve } from 'path';
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import type { ServerConfig, CursorState, CommandPayload, CommandResult } from './types.js';
-import type { ViteDevServer } from 'vite';
 import { waitForFreshExtraction } from './extraction-wait.js';
 import { validateAttachments } from './message-attachments.js';
 import type { StateManager } from './state-manager.js';
@@ -17,6 +17,7 @@ import { markdownToWebHtml, readPlanFile } from './plan-files.js';
 import type { ExtensionFileBridge } from './extension-file-bridge.js';
 import { SERVER_INSTANCE } from './server-info.js';
 import type { ServerDiagnostics } from '../shared/diagnostics.js';
+import { GIT_SNAPSHOT_PUSH_PATH, type GitSnapshotPushPayload } from '../shared/extension-bridge.js';
 import {
   WEBAPP_SESSION_COOKIE,
   createWebappSessionStore,
@@ -27,6 +28,19 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const POST_COMMAND_REFRESH_DELAYS_MS = [0, 150, 450, 1000, 2000];
+
+interface ViteDevServer {
+  middlewares: express.RequestHandler;
+  close(): Promise<void>;
+}
+
+function resolvePackageRoot(): string {
+  const fromEnv = process.env.PACKAGE_ROOT?.trim();
+  if (fromEnv && existsSync(join(fromEnv, 'package.json'))) return fromEnv;
+  const fromBundle = join(__dirname, '..', '..');
+  if (existsSync(join(fromBundle, 'package.json'))) return fromBundle;
+  return process.cwd();
+}
 
 function resolveClientDir(serverDir: string): { clientDir: string; clientBuild: 'vite-dev' | 'static' } {
   const clientSrc = process.env.CLIENT_SRC_DIR?.trim();
@@ -223,6 +237,14 @@ export class Relay {
     return req.socket.remoteAddress ?? 'unknown';
   }
 
+  private isLocalRequest(req: express.Request): boolean {
+    const ip = req.socket.remoteAddress ?? '';
+    return ip === '127.0.0.1'
+      || ip === '::1'
+      || ip === '::ffff:127.0.0.1'
+      || ip.endsWith('127.0.0.1');
+  }
+
   private checkRateLimit(ip: string): { allowed: boolean; retryAfter: number } {
     const now = Date.now();
     const entry = this.loginAttempts.get(ip);
@@ -283,6 +305,7 @@ export class Relay {
         clientBuild: this.clientBuild,
       },
       extensionBridge: this.extensionBridge.getDiagnostics(),
+      gitSnapshots: this.stateManager.getGitSnapshotDiagnostics(activeWindow?.title ?? null),
       gitStatus: state.gitStatus,
       connected: state.connected,
       generation: this.stateManager.generation,
@@ -299,6 +322,39 @@ export class Relay {
     const isSourceClient = this.clientBuild === 'vite-dev';
 
     this.app.use(express.json());
+
+    this.app.post(GIT_SNAPSHOT_PUSH_PATH, (req, res) => {
+      if (!this.isLocalRequest(req)) {
+        res.status(403).json({ error: 'forbidden' });
+        return;
+      }
+
+      const payload = req.body as GitSnapshotPushPayload;
+      if (
+        !payload
+        || typeof payload.windowKey !== 'string'
+        || !payload.windowKey.trim()
+        || !payload.gitStatus
+        || typeof payload.gitStatus.changedCount !== 'number'
+      ) {
+        res.status(400).json({ error: 'invalid payload' });
+        return;
+      }
+
+      const gitStatus = this.stateManager.upsertGitWindowSnapshot({
+        ...payload,
+        windowKey: payload.windowKey.trim(),
+        updatedAt: payload.updatedAt || Date.now(),
+        gitStatus: {
+          ...payload.gitStatus,
+          available: payload.gitStatus.available !== false,
+          source: 'vscode.git',
+          updatedAt: payload.updatedAt || Date.now(),
+          windowKey: payload.windowKey.trim(),
+        },
+      });
+      res.json({ ok: true, gitStatus });
+    });
 
     this.app.get('/login', (_req, res) => {
       if (!this.authEnabled) return res.redirect('/');
@@ -458,12 +514,16 @@ export class Relay {
   }
 
   private getViteDevServer(clientDir: string): Promise<ViteDevServer> {
-    this.viteDevServer ??= import('vite').then(({ createServer }) => {
-      const packageRoot = process.env.PACKAGE_ROOT?.trim();
-      const configFile = packageRoot && existsSync(join(packageRoot, 'vite.config.ts'))
+    this.viteDevServer ??= (async () => {
+      const packageRoot = resolvePackageRoot();
+      const requireFromPackage = createRequire(join(packageRoot, 'package.json'));
+      const { createServer: createViteServer } = requireFromPackage('vite') as {
+        createServer: (options: Record<string, unknown>) => Promise<ViteDevServer>;
+      };
+      const configFile = existsSync(join(packageRoot, 'vite.config.ts'))
         ? join(packageRoot, 'vite.config.ts')
         : undefined;
-      return createServer({
+      return createViteServer({
         root: clientDir,
         configFile,
         server: {
@@ -472,7 +532,7 @@ export class Relay {
         },
         appType: 'spa',
       });
-    });
+    })();
     return this.viteDevServer;
   }
 

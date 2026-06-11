@@ -2,7 +2,12 @@ import * as vscode from 'vscode';
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from 'fs';
 import type { UnifiedOutputChannel } from './output-channel.js';
 import type { ServerManager } from './server-manager.js';
-import type { GitStatusInfo, OpenSourceControlRequest, OpenSourceControlResult } from '../../src/shared/extension-bridge.js';
+import type {
+  GitSnapshotPushPayload,
+  GitStatusInfo,
+  OpenSourceControlRequest,
+  OpenSourceControlResult,
+} from '../../src/shared/extension-bridge.js';
 import {
   gitBridgeDebugPath,
   gitStatusBridgePath,
@@ -11,6 +16,7 @@ import {
 } from '../../src/shared/extension-bridge.js';
 import type { GitBridgeDebugInfo, GitBridgeRepoDebugInfo } from '../../src/shared/diagnostics.js';
 import { countGitChanges, countGitChangesAcrossRepositories } from '../../src/shared/git-status-count.js';
+import { resolveWorkspaceIdentity } from '../../src/shared/workspace-identity.js';
 
 const REFRESH_INTERVAL_MS = 5000;
 const REPO_CHANGE_DEBOUNCE_MS = 500;
@@ -41,11 +47,12 @@ export class GitStateBridge implements vscode.Disposable {
   private repoListeners = new Map<string, vscode.Disposable>();
   private lastRequestId = '';
   private lastWrittenGitStatus = '';
+  private lastPushedSignature = '';
   private repoChangeDebounce: ReturnType<typeof setTimeout> | null = null;
   private refreshInFlight: Promise<void> | null = null;
   private suppressRepoChange = false;
   private extensionVersion: string;
-  private lastActiveWindowId = '';
+  private extensionInstanceId: string;
   private disposed = false;
 
   constructor(
@@ -57,6 +64,10 @@ export class GitStateBridge implements vscode.Disposable {
     this.outputChannel = outputChannel;
     this.serverManager = serverManager;
     this.extensionVersion = context.extension.packageJSON?.version ?? 'unknown';
+    this.extensionInstanceId = context.globalState.get<string>('gitBridgeInstanceId')
+      ?? vscode.env.sessionId
+      ?? `ext-${Date.now()}`;
+    void context.globalState.update('gitBridgeInstanceId', this.extensionInstanceId);
   }
 
   start(): void {
@@ -69,13 +80,8 @@ export class GitStateBridge implements vscode.Disposable {
       void this.handleOpenSourceControlRequest();
     });
     this.serverManager.on('started', () => {
-      if (!this.serverManager.isOwner) return;
       this.lastWrittenGitStatus = '';
-      void this.refreshGitStatus(true);
-    });
-    this.serverManager.on('health', (health) => {
-      if (!health?.activeWindowId || health.activeWindowId === this.lastActiveWindowId) return;
-      this.lastActiveWindowId = health.activeWindowId;
+      this.lastPushedSignature = '';
       void this.refreshGitStatus(true);
     });
     void this.refreshGitStatus(true);
@@ -134,14 +140,32 @@ export class GitStateBridge implements vscode.Disposable {
     }, REPO_CHANGE_DEBOUNCE_MS);
   }
 
+  private resolveWindowKey(): string {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    const includeQualifier = vscode.workspace
+      .getConfiguration('cursorRemote')
+      .get<boolean>('windowTitleQualifier', true);
+    if (!folder) {
+      return vscode.workspace.name ?? 'unknown';
+    }
+    return resolveWorkspaceIdentity({
+      workspacePath: folder.uri.fsPath,
+      workspaceName: vscode.workspace.name,
+      authority: folder.uri.authority || undefined,
+      includeQualifier,
+    });
+  }
+
   private async refreshGitStatusNow(runGitStatus: boolean): Promise<void> {
     const windowName = vscode.workspace.name
       ?? vscode.workspace.workspaceFolders?.[0]?.name
       ?? 'unknown';
+    const windowKey = this.resolveWindowKey();
     const debugBase: GitBridgeDebugInfo = {
       updatedAt: Date.now(),
       extensionVersion: this.extensionVersion,
       windowName,
+      windowKey,
       isOwner: this.serverManager.isOwner,
       gitApiAvailable: false,
       repoCount: 0,
@@ -152,7 +176,13 @@ export class GitStateBridge implements vscode.Disposable {
     const git = await this.getGitApi();
     if (!git) {
       this.writeGitBridgeDebug({ ...debugBase, lastError: 'vscode.git unavailable' });
-      this.writeGitStatus(null);
+      await this.pushGitSnapshot({
+        available: false,
+        changedCount: 0,
+        updatedAt: Date.now(),
+        source: 'vscode.git',
+        windowKey,
+      }, windowKey, debugBase);
       return;
     }
 
@@ -162,7 +192,13 @@ export class GitStateBridge implements vscode.Disposable {
     this.ensureRepoListeners(repositories);
     if (!repositories.length) {
       this.writeGitBridgeDebug({ ...debugBase, lastError: 'no repository for workspace' });
-      this.writeGitStatus(null);
+      await this.pushGitSnapshot({
+        available: false,
+        changedCount: 0,
+        updatedAt: Date.now(),
+        source: 'vscode.git',
+        windowKey,
+      }, windowKey, debugBase);
       return;
     }
 
@@ -192,7 +228,6 @@ export class GitStateBridge implements vscode.Disposable {
     const changedCount = countGitChangesAcrossRepositories(repositories.map(repo => repo.state));
     debugBase.changedCount = changedCount;
     debugBase.repoBreakdown = repoBreakdown;
-    this.writeGitBridgeDebug(debugBase);
 
     const payload: GitStatusInfo = {
       available: true,
@@ -200,8 +235,72 @@ export class GitStateBridge implements vscode.Disposable {
       repoLabel: debugBase.repoLabel,
       updatedAt: Date.now(),
       source: 'vscode.git',
+      windowKey,
     };
-    this.writeGitStatus(payload);
+    await this.pushGitSnapshot(payload, windowKey, debugBase, repoBreakdown);
+  }
+
+  private async pushGitSnapshot(
+    gitStatus: GitStatusInfo,
+    windowKey: string,
+    debugBase: GitBridgeDebugInfo,
+    repoBreakdown?: GitBridgeRepoDebugInfo[],
+  ): Promise<void> {
+    const pushPayload: GitSnapshotPushPayload = {
+      windowKey,
+      gitStatus,
+      repoBreakdown,
+      updatedAt: gitStatus.updatedAt,
+      extensionInstanceId: this.extensionInstanceId,
+    };
+
+    const signature = `${windowKey}:${gitStatus.available}:${gitStatus.changedCount}:${JSON.stringify(repoBreakdown ?? [])}`;
+
+    if (this.serverManager.isOwner) {
+      this.writeGitStatus(gitStatus);
+    }
+
+    let pushDebug: Partial<GitBridgeDebugInfo> = {};
+    if (signature !== this.lastPushedSignature) {
+      pushDebug = await this.postGitSnapshot(pushPayload);
+      if (pushDebug.lastPushOk) {
+        this.lastPushedSignature = signature;
+      }
+    } else {
+      pushDebug = { lastPushOk: true, lastPushAt: debugBase.updatedAt };
+    }
+
+    this.writeGitBridgeDebug({ ...debugBase, ...pushDebug });
+  }
+
+  private async postGitSnapshot(payload: GitSnapshotPushPayload): Promise<Partial<GitBridgeDebugInfo>> {
+    const pushUrl = this.serverManager.getGitSnapshotPushUrl();
+    try {
+      const resp = await fetch(pushUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(2500),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        return {
+          lastPushAt: Date.now(),
+          lastPushOk: false,
+          lastPushError: text || `HTTP ${resp.status}`,
+        };
+      }
+      return {
+        lastPushAt: Date.now(),
+        lastPushOk: true,
+      };
+    } catch (err) {
+      return {
+        lastPushAt: Date.now(),
+        lastPushOk: false,
+        lastPushError: err instanceof Error ? err.message : String(err),
+      };
+    }
   }
 
   private ensureRepoListeners(repositories: GitRepository[]): void {
@@ -250,10 +349,8 @@ export class GitStateBridge implements vscode.Disposable {
   }
 
   private writeGitStatus(payload: GitStatusInfo | null): void {
-    if (!this.serverManager.isOwner) return;
-
     const signature = payload
-      ? `${payload.available}:${payload.changedCount}:${payload.repoLabel}`
+      ? `${payload.windowKey}:${payload.available}:${payload.changedCount}:${payload.repoLabel}`
       : 'null';
     if (signature === this.lastWrittenGitStatus) return;
 

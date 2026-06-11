@@ -1,9 +1,32 @@
 import { EventEmitter } from 'events';
 import type { ChatElement, CursorState, CursorWindow } from './types.js';
-import type { GitStatusInfo } from '../shared/extension-bridge.js';
+import type { GitSnapshotPushPayload, GitStatusInfo, GitWindowSnapshot } from '../shared/extension-bridge.js';
+import type { GitSnapshotStoreDiagnostics } from '../shared/diagnostics.js';
 import { AGENT_ACTIVITY_STALE_MS } from './activity-stale.js';
 import { filterActionableApprovals } from './approval-filter.js';
 import { mergeMessages } from './message-history.js';
+
+export function findGitSnapshotForTitle(
+  windowTitle: string,
+  snapshots: Map<string, GitWindowSnapshot>,
+): GitWindowSnapshot | undefined {
+  if (!windowTitle) return undefined;
+  const exact = snapshots.get(windowTitle);
+  if (exact) return exact;
+
+  const normalizedTitle = windowTitle.toLowerCase();
+  for (const [key, snapshot] of snapshots) {
+    if (key.toLowerCase() === normalizedTitle) return snapshot;
+  }
+
+  const titleBase = windowTitle.split(' ')[0]?.toLowerCase();
+  if (!titleBase) return undefined;
+  for (const [key, snapshot] of snapshots) {
+    const keyBase = key.split(' ')[0]?.toLowerCase();
+    if (keyBase === titleBase) return snapshot;
+  }
+  return undefined;
+}
 
 function emptyState(): CursorState {
   return {
@@ -52,6 +75,10 @@ export class StateManager extends EventEmitter {
   private activitySuppressedMatch: string | undefined = undefined;
   private historyScope = '';
   private messageHistory: ChatElement[] = [];
+  private gitWindowSnapshots = new Map<string, GitWindowSnapshot>();
+  private activeGitWindowKey: string | null = null;
+  private lastGitPushAt: number | null = null;
+  private lastGitPushWindowKey: string | null = null;
 
   get generation(): number {
     return this._generation;
@@ -259,12 +286,15 @@ export class StateManager extends EventEmitter {
   }
 
   updateWindows(windows: CursorWindow[], activeWindowId: string): void {
-    const changed =
-      this.currentState.activeWindowId !== activeWindowId ||
-      JSON.stringify(this.currentState.windows) !== JSON.stringify(windows);
-    if (!changed) return;
+    const windowsChanged = JSON.stringify(this.currentState.windows) !== JSON.stringify(windows);
+    const activeChanged = this.currentState.activeWindowId !== activeWindowId;
+    if (!windowsChanged && !activeChanged) return;
+
     this.currentState = { ...this.currentState, windows, activeWindowId };
-    this.emit('state:patch', { windows, activeWindowId });
+    const gitPatch = this.syncGitStatusForActiveWindow();
+    const patch: Partial<CursorState> = { windows, activeWindowId };
+    if (gitPatch) patch.gitStatus = gitPatch;
+    this.emit('state:patch', patch);
   }
 
   /** Push per-window mode/model into global state (e.g. from a cached snapshot on window switch). */
@@ -284,6 +314,60 @@ export class StateManager extends EventEmitter {
     if (JSON.stringify(this.currentState.gitStatus) === JSON.stringify(gitStatus)) return;
     this.currentState = { ...this.currentState, gitStatus };
     this.emit('state:patch', { gitStatus });
+  }
+
+  upsertGitWindowSnapshot(payload: GitSnapshotPushPayload): GitStatusInfo | null {
+    const snapshot: GitWindowSnapshot = {
+      windowKey: payload.windowKey,
+      gitStatus: { ...payload.gitStatus, windowKey: payload.windowKey },
+      repoBreakdown: payload.repoBreakdown,
+      updatedAt: payload.updatedAt,
+      extensionInstanceId: payload.extensionInstanceId,
+    };
+    this.gitWindowSnapshots.set(payload.windowKey, snapshot);
+    this.lastGitPushAt = Date.now();
+    this.lastGitPushWindowKey = payload.windowKey;
+    const gitStatus = this.syncGitStatusForActiveWindow();
+    if (gitStatus !== undefined) {
+      this.emit('state:patch', { gitStatus: gitStatus ?? null });
+    }
+    return gitStatus ?? null;
+  }
+
+  getGitSnapshotDiagnostics(activeWindowTitle: string | null): GitSnapshotStoreDiagnostics {
+    const windowSnapshots: GitSnapshotStoreDiagnostics['windowSnapshots'] = {};
+    for (const [key, snapshot] of this.gitWindowSnapshots) {
+      windowSnapshots[key] = {
+        windowKey: snapshot.windowKey,
+        changedCount: snapshot.gitStatus.changedCount,
+        repoLabel: snapshot.gitStatus.repoLabel,
+        updatedAt: snapshot.updatedAt,
+        repoBreakdown: snapshot.repoBreakdown,
+      };
+    }
+    return {
+      activeWindowKey: this.activeGitWindowKey,
+      activeWindowTitle,
+      lastPushAt: this.lastGitPushAt,
+      lastPushWindowKey: this.lastGitPushWindowKey,
+      windowSnapshots,
+    };
+  }
+
+  private syncGitStatusForActiveWindow(): GitStatusInfo | null | undefined {
+    const activeWindow = this.currentState.windows.find(
+      window => window.id === this.currentState.activeWindowId,
+    );
+    const snapshot = activeWindow
+      ? findGitSnapshotForTitle(activeWindow.title, this.gitWindowSnapshots)
+      : undefined;
+    this.activeGitWindowKey = snapshot?.windowKey ?? null;
+    const nextGitStatus = snapshot?.gitStatus ?? null;
+    if (JSON.stringify(this.currentState.gitStatus) === JSON.stringify(nextGitStatus)) {
+      return undefined;
+    }
+    this.currentState = { ...this.currentState, gitStatus: nextGitStatus };
+    return nextGitStatus;
   }
 
   private diff(
