@@ -106,6 +106,20 @@ function createTestEnv() {
   };
 }
 
+function installFetchStub(data: unknown) {
+  const previousFetch = (globalThis as any).fetch;
+  Object.defineProperty(globalThis, 'fetch', {
+    value: async () => ({
+      ok: true,
+      json: async () => data,
+    }),
+    configurable: true,
+  });
+  return () => {
+    Object.defineProperty(globalThis, 'fetch', { value: previousFetch, configurable: true });
+  };
+}
+
 function fireFullState(mockSocket: MockSocket, state: CursorState) {
   act(() => mockSocket.fire('state:full', state));
 }
@@ -685,24 +699,77 @@ describe('web: git status', () => {
 
 describe('web: debug panel', () => {
   let env: ReturnType<typeof createTestEnv>;
+  let restoreFetch: (() => void) | null = null;
 
   beforeEach(() => {
+    restoreFetch = installFetchStub({
+      server: {
+        version: '0.1.46-local',
+        instanceId: 'debug-test',
+        pid: 123,
+        port: 3002,
+        host: '127.0.0.1',
+        dataDirName: 'cursor-remote.cursor-remote',
+        startedAt: Date.now(),
+        clientBuild: 'vite-dev',
+      },
+      gitStatus: null,
+      generation: 1,
+      uptime: 5,
+      clients: 1,
+      connected: true,
+      extensionBridge: {},
+      activeWindowId: '',
+      activeWindowTitle: null,
+      cdpUrl: 'http://127.0.0.1:19222',
+    });
     env = createTestEnv();
   });
 
-  afterEach(() => env.cleanup());
+  afterEach(() => {
+    restoreFetch?.();
+    env.cleanup();
+  });
 
-  it('renders debug pill and opens debug sheet', async () => {
-    const pill = env.document.getElementById('pill-debug') as HTMLButtonElement;
-    assert.ok(pill, 'Expected debug pill to be rendered');
+  it('opens debug sheet from server version badge and does not render debug pill', async () => {
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const pill = env.document.getElementById('pill-debug');
+    assert.equal(pill, null, 'Expected debug pill to be removed');
+
+    const badge = env.document.getElementById('server-version-badge') as HTMLButtonElement;
+    assert.ok(badge, 'Expected server version badge to be rendered');
 
     await act(async () => {
-      pill.click();
+      badge.click();
     });
 
     const sheet = env.document.getElementById('sheet-debug');
     assert.ok(sheet, 'Expected debug sheet to open');
     assert.equal(sheet?.classList.contains('hidden'), false);
+  });
+
+  it('sends kill server command from debug sheet', async () => {
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const badge = env.document.getElementById('server-version-badge') as HTMLButtonElement;
+    await act(async () => {
+      badge.click();
+    });
+
+    const killButton = env.document.getElementById('debug-kill-server') as HTMLButtonElement;
+    assert.ok(killButton, 'Expected kill button in debug sheet');
+
+    await act(async () => {
+      killButton.click();
+    });
+
+    const sent = env.mockSocket.emitted.find(item => item.event === 'command:kill_server');
+    assert.ok(sent, 'Expected kill button to emit kill_server command');
   });
 });
 

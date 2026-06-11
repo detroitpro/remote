@@ -9,8 +9,8 @@ import {
   openSourceControlRequestPath,
   openSourceControlResultPath,
 } from '../../src/shared/extension-bridge.js';
-import type { GitBridgeDebugInfo } from '../../src/shared/diagnostics.js';
-import { countGitChanges } from '../../src/shared/git-status-count.js';
+import type { GitBridgeDebugInfo, GitBridgeRepoDebugInfo } from '../../src/shared/diagnostics.js';
+import { countGitChanges, countGitChangesAcrossRepositories } from '../../src/shared/git-status-count.js';
 
 const REFRESH_INTERVAL_MS = 5000;
 const REPO_CHANGE_DEBOUNCE_MS = 500;
@@ -45,6 +45,7 @@ export class GitStateBridge implements vscode.Disposable {
   private refreshInFlight: Promise<void> | null = null;
   private suppressRepoChange = false;
   private extensionVersion: string;
+  private lastActiveWindowId = '';
   private disposed = false;
 
   constructor(
@@ -70,6 +71,11 @@ export class GitStateBridge implements vscode.Disposable {
     this.serverManager.on('started', () => {
       if (!this.serverManager.isOwner) return;
       this.lastWrittenGitStatus = '';
+      void this.refreshGitStatus(true);
+    });
+    this.serverManager.on('health', (health) => {
+      if (!health?.activeWindowId || health.activeWindowId === this.lastActiveWindowId) return;
+      this.lastActiveWindowId = health.activeWindowId;
       void this.refreshGitStatus(true);
     });
     void this.refreshGitStatus(true);
@@ -152,21 +158,23 @@ export class GitStateBridge implements vscode.Disposable {
 
     debugBase.gitApiAvailable = true;
     debugBase.repoCount = git.repositories.length;
-    this.ensureRepoListeners(git.repositories);
-    const repo = this.resolveRepository(git);
-    if (!repo) {
+    const repositories = this.resolveRepositories(git);
+    this.ensureRepoListeners(repositories);
+    if (!repositories.length) {
       this.writeGitBridgeDebug({ ...debugBase, lastError: 'no repository for workspace' });
       this.writeGitStatus(null);
       return;
     }
 
     debugBase.repoResolved = true;
-    debugBase.repoLabel = vscode.workspace.workspaceFolders?.[0]?.name || repo.rootUri.fsPath.split(/[\\/]/).pop() || 'workspace';
+    debugBase.repoLabel = vscode.workspace.workspaceFolders?.[0]?.name || repositories[0].rootUri.fsPath.split(/[\\/]/).pop() || 'workspace';
 
-    if (runGitStatus && repo.status) {
+    if (runGitStatus) {
       this.suppressRepoChange = true;
       try {
-        await repo.status();
+        for (const repo of repositories) {
+          await repo.status?.();
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.outputChannel.warn(`[git-bridge] repo.status() failed: ${message}`);
@@ -176,8 +184,14 @@ export class GitStateBridge implements vscode.Disposable {
       }
     }
 
-    const changedCount = countGitChanges(repo.state);
+    const repoBreakdown: GitBridgeRepoDebugInfo[] = repositories.map(repo => ({
+      rootUri: repo.rootUri.toString(),
+      label: repo.rootUri.fsPath.split(/[\\/]/).pop() || repo.rootUri.fsPath,
+      changedCount: countGitChanges(repo.state),
+    }));
+    const changedCount = countGitChangesAcrossRepositories(repositories.map(repo => repo.state));
     debugBase.changedCount = changedCount;
+    debugBase.repoBreakdown = repoBreakdown;
     this.writeGitBridgeDebug(debugBase);
 
     const payload: GitStatusInfo = {
@@ -222,24 +236,17 @@ export class GitStateBridge implements vscode.Disposable {
     }
   }
 
-  private resolveRepository(git: GitExtensionApi): GitRepository | null {
+  private resolveRepositories(git: GitExtensionApi): GitRepository[] {
+    if (!git.repositories.length) return [];
     const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (workspaceUri && git.getRepository) {
-      const repo = git.getRepository(workspaceUri);
-      if (repo) return repo;
-    }
-    return this.pickRepository(git.repositories);
-  }
-
-  private pickRepository(repositories: GitRepository[]): GitRepository | null {
-    if (!repositories.length) return null;
-    const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (!workspaceUri) return repositories[0];
+    if (!workspaceUri) return [...git.repositories];
 
     const workspacePath = normalizePath(workspaceUri.fsPath);
-    return repositories.find(repo => normalizePath(repo.rootUri.fsPath) === workspacePath)
-      || repositories.find(repo => workspacePath.startsWith(normalizePath(repo.rootUri.fsPath) + '/'))
-      || repositories[0];
+    const exactMatches = git.repositories.filter(repo => normalizePath(repo.rootUri.fsPath) === workspacePath);
+    if (exactMatches.length) return exactMatches;
+
+    const nestedMatches = git.repositories.filter(repo => workspacePath.startsWith(normalizePath(repo.rootUri.fsPath) + '/'));
+    return nestedMatches.length ? nestedMatches : [...git.repositories];
   }
 
   private writeGitStatus(payload: GitStatusInfo | null): void {

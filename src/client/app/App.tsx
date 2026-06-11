@@ -1077,16 +1077,6 @@ function ComposerInput({ state, serverHealth }: { state: CursorState; serverHeal
             B:{backgroundTasks.length}
           </button>
         )}
-        <button
-          id="pill-debug"
-          className="debug-pill"
-          type="button"
-          aria-label="Open server debug panel"
-          title={serverHealth?.server ? `Server ${serverHealth.server.instanceId}` : 'Server debug'}
-          onClick={() => ui.openSheet('debug')}
-        >
-          Dbg
-        </button>
       </div>
       <div className="input-wrapper" onPaste={handlePaste}>
         <AttachmentStrip attachments={attachments} onRemove={id => setAttachments(items => items.filter(item => item.id !== id))} />
@@ -1438,6 +1428,7 @@ function DebugSheet({
   socketConnected: boolean;
 }) {
   const ui = React.useContext(UiStateContext)!;
+  const command = useCommandClient();
   const [details, setDetails] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -1464,6 +1455,9 @@ function DebugSheet({
     const bridge = details?.extensionBridge as Record<string, unknown> | undefined;
     const bridgeDebug = bridge?.gitBridgeDebug as Record<string, unknown> | undefined;
     const server = (details?.server ?? serverHealth?.server) as Record<string, unknown> | undefined;
+    const repoBreakdown = Array.isArray(bridgeDebug?.repoBreakdown)
+      ? bridgeDebug.repoBreakdown.map((repo: any) => `${repo.label}:${repo.changedCount}`).join(', ')
+      : '—';
     return [
       ['Client URL', window.location.origin],
       ['Socket', socketConnected ? 'connected' : 'disconnected'],
@@ -1481,6 +1475,7 @@ function DebugSheet({
       ['Git bridge owner', bridgeDebug?.isOwner == null ? '—' : String(bridgeDebug.isOwner)],
       ['Git bridge repos', bridgeDebug?.repoCount ?? '—'],
       ['Git bridge resolved', bridgeDebug?.repoResolved == null ? '—' : String(bridgeDebug.repoResolved)],
+      ['Git repo breakdown', repoBreakdown],
       ['Git bridge count', bridgeDebug?.changedCount ?? '—'],
       ['Git bridge error', bridgeDebug?.lastError ?? '—'],
       ['Generation', details?.generation ?? serverHealth?.generation ?? '—'],
@@ -1502,6 +1497,15 @@ function DebugSheet({
     }
   }, [details, serverHealth, socketConnected, state.gitStatus, ui]);
 
+  const killServer = useCallback(async () => {
+    const result = await command.sendCommandAwaitResult('command:kill_server');
+    if (!result.ok) {
+      ui.showToast(result.error || 'Kill server failed', 'error');
+      return;
+    }
+    ui.showToast('Server kill sent', 'success');
+  }, [command, ui]);
+
   return (
     <div id="sheet-debug" className={`bottom-sheet debug-sheet ${visible ? '' : 'hidden'}`}>
       <div className="sheet-header debug-sheet-header">
@@ -1509,6 +1513,9 @@ function DebugSheet({
         <div className="debug-sheet-actions">
           <button type="button" className="debug-action-btn" disabled={loading} onClick={() => void loadDetails()}>
             {loading ? 'Loading…' : 'Refresh'}
+          </button>
+          <button id="debug-kill-server" type="button" className="debug-action-btn" onClick={() => void killServer()}>
+            Kill server
           </button>
           <button type="button" className="debug-action-btn" onClick={() => void copyJson()}>
             Copy JSON

@@ -20,6 +20,12 @@ export interface ExtensionBridgeDiagnostics {
   gitBridgeDebug: GitBridgeDebugInfo | null;
 }
 
+export interface GitBridgeRepoDebugInfo {
+  rootUri: string;
+  label: string;
+  changedCount: number;
+}
+
 export interface GitBridgeDebugInfo {
   updatedAt: number;
   extensionVersion: string;
@@ -30,6 +36,7 @@ export interface GitBridgeDebugInfo {
   repoResolved: boolean;
   repoLabel?: string;
   changedCount?: number;
+  repoBreakdown?: GitBridgeRepoDebugInfo[];
   runGitStatus: boolean;
   lastError?: string;
 }

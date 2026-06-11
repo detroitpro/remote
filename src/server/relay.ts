@@ -863,6 +863,22 @@ export class Relay {
         }
       });
 
+      socket.on('command:kill_server', async (payload: CommandPayload) => {
+        if (!payload.commandId) {
+          socket.emit('command:result', {
+            commandId: 'unknown',
+            ok: false,
+            error: 'Missing commandId',
+          } satisfies CommandResult);
+          return;
+        }
+        console.log(`[relay] Command: kill_server from ${socket.id}`);
+        socket.emit('command:result', { commandId: payload.commandId, ok: true } satisfies CommandResult);
+        setTimeout(() => {
+          void this.stop().finally(() => process.exit(0));
+        }, 50);
+      });
+
       socket.on('command:switch_window', async (payload: CommandPayload) => {
         if (!payload.commandId || !payload.windowId) {
           socket.emit('command:result', {
