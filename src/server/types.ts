@@ -108,6 +108,8 @@ export interface ChatTab {
   isActive: boolean;
   status: string;
   selectorPath: string;
+  /** `open` = editor tab bar; `sidebar` = agent list in the sidebar. */
+  source: 'open' | 'sidebar';
 }
 
 export interface ModeInfo {
@@ -313,7 +315,7 @@ export interface SelectorConfig {
 
 export interface CommandPayload {
   commandId: string;
-  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model';
+  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'close_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model';
   text?: string;
   approvalId?: string;
   actionType?: string;
@@ -324,6 +326,7 @@ export interface CommandPayload {
   planLabel?: string;
   planModelId?: string;
   tabTitle?: string;
+  tabSource?: 'open' | 'sidebar';
   windowId?: string;
 }
 

@@ -1647,6 +1647,26 @@ header {
 
 .tab-list::-webkit-scrollbar { display: none; }
 
+.tab-group-label {
+  flex-shrink: 0;
+  padding: 4px 6px 4px 2px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-quaternary);
+  user-select: none;
+}
+
+.tab-group-divider {
+  flex-shrink: 0;
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border-color);
+  align-self: center;
+}
+
 .tab-item {
   flex-shrink: 0;
   padding: 4px 10px;
@@ -1808,6 +1828,18 @@ header {
 }
 
 .sheet-item:active { background: var(--bg-hover); }
+
+.sheet-item-danger {
+  color: var(--accent-red);
+}
+
+.sheet-tab-hint {
+  margin: 0;
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
 
 .sheet-item.selected {
   color: var(--accent-blue);

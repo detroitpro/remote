@@ -311,9 +311,27 @@ export class CommandExecutor {
   async switchTab(
     commandId: string,
     tabTitle: string,
-    _selectorPath?: string
+    selectorPath?: string,
+    composerId?: string,
+    tabSource?: 'open' | 'sidebar'
   ): Promise<CommandResult> {
     return this.withRetry(commandId, async (client) => {
+      if (tabSource === 'open' || this.isComposerUuid(composerId)) {
+        await this.clickOpenComposerTab(client, composerId, tabTitle);
+        console.log(`[command-executor] Switched open tab: ${tabTitle}`);
+        return;
+      }
+
+      if (selectorPath && tabSource !== 'sidebar') {
+        try {
+          await client.click(selectorPath);
+          console.log(`[command-executor] Switched tab via selector: ${tabTitle}`);
+          return;
+        } catch {
+          // Fall through to title-based sidebar matching.
+        }
+      }
+
       const clicked = await client.evaluate(`
         (() => {
           const title = ${JSON.stringify(tabTitle)};
@@ -360,6 +378,18 @@ export class CommandExecutor {
               throw new Error('Ambiguous tab title for glass sidebar: ' + title);
             }
           }
+          const editorTabs = document.querySelectorAll(
+            '.tabs-container .tab[aria-label*="Chat Editors"], .editor-group-container.has-composer-editor .tab[role="tab"]'
+          );
+          for (const tab of Array.from(editorTabs)) {
+            const ariaLabel = tab.getAttribute('aria-label') || '';
+            const rawTitle = (ariaLabel.split(',')[0] || (tab.textContent || '')).trim();
+            const text = norm(rawTitle);
+            if (text === target) {
+              tab.click();
+              return true;
+            }
+          }
           const cells = document.querySelectorAll('.agent-sidebar-cell');
           for (const cell of Array.from(cells)) {
             const titleEl = cell.querySelector('.agent-sidebar-cell-text');
@@ -382,6 +412,21 @@ export class CommandExecutor {
       `) as boolean;
       if (!clicked) throw new Error('Tab not found: ' + tabTitle);
       console.log(`[command-executor] Switched tab: ${tabTitle}`);
+    });
+  }
+
+  async closeTab(
+    commandId: string,
+    tabTitle: string,
+    composerId?: string,
+    tabSource?: 'open' | 'sidebar'
+  ): Promise<CommandResult> {
+    return this.withRetry(commandId, async (client) => {
+      if (tabSource !== 'open' && !this.isComposerUuid(composerId)) {
+        throw new Error('Close is only supported for open editor tabs');
+      }
+      await this.clickOpenComposerTabClose(client, composerId, tabTitle);
+      console.log(`[command-executor] Closed open tab: ${tabTitle}`);
     });
   }
 
@@ -911,6 +956,84 @@ export class CommandExecutor {
       throw new Error('"Accept All" button not found');
     }
     return '__clicked_inline__';
+  }
+
+  private isComposerUuid(value?: string): boolean {
+    return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private async clickOpenComposerTab(
+    client: CdpClient,
+    composerId?: string,
+    tabTitle?: string
+  ): Promise<void> {
+    const point = await client.evaluate(`
+      (() => {
+        const composerId = ${JSON.stringify(composerId ?? '')};
+        const title = ${JSON.stringify(tabTitle ?? '')};
+        const norm = s => s.trim().replace(/\\s+/g, ' ').toLowerCase();
+        const target = norm(title);
+        const tabs = Array.from(document.querySelectorAll(
+          '.tabs-container .tab[aria-label*="Chat Editors"], .editor-group-container.has-composer-editor .tab[role="tab"]'
+        ));
+        let tab = null;
+        if (composerId) {
+          tab = tabs.find(t => t.getAttribute('data-resource-name') === composerId) || null;
+        }
+        if (!tab && target) {
+          tab = tabs.find(t => {
+            const aria = t.getAttribute('aria-label') || '';
+            const raw = (aria.split(',')[0] || (t.textContent || '')).trim();
+            return norm(raw) === target;
+          }) || null;
+        }
+        if (!tab) return null;
+        tab.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const r = tab.getBoundingClientRect();
+        return { x: r.left + Math.min(r.width * 0.35, 48), y: r.top + r.height / 2 };
+      })()
+    `) as { x: number; y: number } | null;
+
+    if (!point) throw new Error('Open tab not found: ' + (tabTitle || composerId || 'unknown'));
+    await client.clickAtCoords(point.x, point.y);
+  }
+
+  private async clickOpenComposerTabClose(
+    client: CdpClient,
+    composerId?: string,
+    tabTitle?: string
+  ): Promise<void> {
+    const point = await client.evaluate(`
+      (() => {
+        const composerId = ${JSON.stringify(composerId ?? '')};
+        const title = ${JSON.stringify(tabTitle ?? '')};
+        const norm = s => s.trim().replace(/\\s+/g, ' ').toLowerCase();
+        const target = norm(title);
+        const tabs = Array.from(document.querySelectorAll(
+          '.tabs-container .tab[aria-label*="Chat Editors"], .editor-group-container.has-composer-editor .tab[role="tab"]'
+        ));
+        let tab = null;
+        if (composerId) {
+          tab = tabs.find(t => t.getAttribute('data-resource-name') === composerId) || null;
+        }
+        if (!tab && target) {
+          tab = tabs.find(t => {
+            const aria = t.getAttribute('aria-label') || '';
+            const raw = (aria.split(',')[0] || (t.textContent || '')).trim();
+            return norm(raw) === target;
+          }) || null;
+        }
+        if (!tab) return null;
+        const closeBtn = tab.querySelector('.action-label.codicon-close, a.codicon-close[aria-label*="Close"]');
+        if (!closeBtn) return null;
+        tab.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const r = closeBtn.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()
+    `) as { x: number; y: number } | null;
+
+    if (!point) throw new Error('Tab close button not found: ' + (tabTitle || composerId || 'unknown'));
+    await client.clickAtCoords(point.x, point.y);
   }
 
   private async clickElementCenter(client: CdpClient, selector: string): Promise<void> {

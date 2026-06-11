@@ -1,0 +1,8 @@
+# Vanilla web client — legacy indentation; do not auto-format
+src/client/
+
+dist/
+node_modules/
+releases/
+package-lock.json
+**/*.min.js

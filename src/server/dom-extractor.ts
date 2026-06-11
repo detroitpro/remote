@@ -1339,7 +1339,53 @@ export function extractionFunction(
       return t.trim().substring(0, 120);
     }
 
+    function markSidebarActiveByComposer(tabs: ChatTab[]): void {
+      if (!containerComposerId) return;
+      let matched = false;
+      for (const t of tabs) {
+        if (t.source !== 'sidebar') continue;
+        if (t.composerId === containerComposerId) {
+          matched = true;
+          t.isActive = true;
+          t.status = 'active';
+        }
+      }
+      if (!matched) return;
+      for (const t of tabs) {
+        if (t.source !== 'sidebar') continue;
+        if (t.composerId !== containerComposerId) {
+          t.isActive = false;
+          t.status = 'idle';
+        }
+      }
+    }
+
     try {
+      const seenOpenIds = new Set<string>();
+      const openTabEls = document.querySelectorAll(
+        '.tabs-container .tab[aria-label*="Chat Editors"], .editor-group-container.has-composer-editor .tab[role="tab"]'
+      );
+      for (const tab of Array.from(openTabEls)) {
+        const resourceId = tab.getAttribute('data-resource-name') || '';
+        if (resourceId && seenOpenIds.has(resourceId)) continue;
+        if (resourceId) seenOpenIds.add(resourceId);
+
+        const ariaLabel = tab.getAttribute('aria-label') || '';
+        const rawTitle = (ariaLabel.split(',')[0] || (tab.textContent || '')).trim();
+        const title = cleanTabTitle(rawTitle);
+        if (!title) continue;
+
+        const isActive = tab.getAttribute('aria-selected') === 'true';
+        chatTabs.push({
+          composerId: resourceId || `open:${title}`,
+          title,
+          isActive,
+          status: isActive ? 'active' : 'idle',
+          selectorPath: buildSelectorPath(tab),
+          source: 'open',
+        });
+      }
+
       const seenTitles = new Set<string>();
       let scopeRoot: Element | null = null;
       if (containerComposerId) {
@@ -1405,31 +1451,15 @@ export function extractionFunction(
             isActive,
             status: isActive ? 'active' : 'idle',
             selectorPath: buildSelectorPath(tab),
+            source: 'sidebar',
           });
         }
 
-        if (containerComposerId) {
-          let matched = false;
-          for (const t of chatTabs) {
-            if (t.composerId === containerComposerId) {
-              matched = true;
-              t.isActive = true;
-              t.status = 'active';
-            }
-          }
-          if (matched) {
-            for (const t of chatTabs) {
-              if (t.composerId !== containerComposerId) {
-                t.isActive = false;
-                t.status = 'idle';
-              }
-            }
-          }
-        }
+        markSidebarActiveByComposer(chatTabs);
       }
 
       for (const sel of chatTabSelectors) {
-        if (chatTabs.length > 0) break;
+        if (chatTabs.some((t) => t.source === 'sidebar')) break;
         let tabItems: NodeListOf<Element>;
         try {
           const root: Element | Document = scopeRoot || document;
@@ -1464,31 +1494,11 @@ export function extractionFunction(
             isActive,
             status: isActive ? 'active' : 'idle',
             selectorPath: buildSelectorPath(tab),
+            source: 'sidebar',
           });
         }
-        if (chatTabs.length > 0) {
-          if (containerComposerId) {
-            let matched = false;
-            for (const t of chatTabs) {
-              const match = t.composerId === containerComposerId;
-              if (match) {
-                matched = true;
-                t.isActive = true;
-                t.status = 'active';
-              }
-            }
-            if (matched) {
-              // composerId match found — mark non-matching tabs inactive
-              for (const t of chatTabs) {
-                if (t.composerId !== containerComposerId) {
-                  t.isActive = false;
-                  t.status = 'idle';
-                }
-              }
-            }
-            // If composerId matching failed, keep original isActive from DOM attributes
-            // (data-selected, data-highlighted, .selected, .active)
-          }
+        if (chatTabs.some((t) => t.source === 'sidebar')) {
+          markSidebarActiveByComposer(chatTabs);
           break;
         }
       }

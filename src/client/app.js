@@ -159,6 +159,9 @@
   const $sheetPlanModel = document.getElementById('sheet-plan-model');
   const $sheetPlanModelHeader = document.getElementById('sheet-plan-model-header');
   const $sheetPlanModelList = document.getElementById('sheet-plan-model-list');
+  const $sheetTab = document.getElementById('sheet-tab');
+  const $sheetTabHeader = document.getElementById('sheet-tab-header');
+  const $sheetTabList = document.getElementById('sheet-tab-list');
   const $planModalOverlay = document.getElementById('plan-modal-overlay');
   const $planModalLabel = document.getElementById('plan-modal-label');
   const $planModalTitle = document.getElementById('plan-modal-title');
@@ -1669,6 +1672,88 @@
 
   // --- Tab rendering ---
 
+  let tabSheetTab = null;
+  let tabLongPressTimer = null;
+
+  function tabItemKey(tab) {
+    return `${tab.source || 'sidebar'}:${tab.composerId || tab.title}`;
+  }
+
+  function emitSwitchTab(tab) {
+    socket.emit('command:switch_tab', {
+      commandId: newCommandId(),
+      tabTitle: tab.title,
+      composerId: tab.composerId,
+      tabSource: tab.source || 'sidebar',
+    });
+  }
+
+  function emitCloseTab(tab) {
+    socket.emit('command:close_tab', {
+      commandId: newCommandId(),
+      tabTitle: tab.title,
+      composerId: tab.composerId,
+      tabSource: tab.source || 'open',
+    });
+  }
+
+  function openTabSheet(tab) {
+    tabSheetTab = tab;
+    closeSheet();
+    activeSheet = 'tab';
+    $sheetOverlay.classList.remove('hidden');
+    $sheetTab.classList.remove('hidden');
+    $sheetTabHeader.textContent = tab.title || 'Záložka';
+    $sheetTabList.replaceChildren();
+
+    if (tab.source === 'open') {
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'sheet-item sheet-item-danger';
+      closeBtn.innerHTML = '<span class="sheet-item-icon">×</span><span>Zavřít záložku</span>';
+      closeBtn.addEventListener('click', () => {
+        emitCloseTab(tab);
+        closeSheet();
+        showToast('Zavírám záložku…', 'success');
+      });
+      $sheetTabList.appendChild(closeBtn);
+    } else {
+      const hint = document.createElement('p');
+      hint.className = 'sheet-tab-hint';
+      hint.textContent = 'Zavření je dostupné jen u otevřených záložek v editoru.';
+      $sheetTabList.appendChild(hint);
+    }
+  }
+
+  function bindTabContextMenu(btn, tab) {
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openTabSheet(tab);
+    });
+
+    btn.addEventListener('touchstart', () => {
+      clearTimeout(tabLongPressTimer);
+      tabLongPressTimer = setTimeout(() => {
+        if (navigator.vibrate) navigator.vibrate(20);
+        openTabSheet(tab);
+      }, 500);
+    }, { passive: true });
+
+    const cancelLongPress = () => clearTimeout(tabLongPressTimer);
+    btn.addEventListener('touchend', cancelLongPress);
+    btn.addEventListener('touchmove', cancelLongPress);
+    btn.addEventListener('touchcancel', cancelLongPress);
+  }
+
+  function createTabButton(tab, index) {
+    const btn = document.createElement('button');
+    btn.className = 'tab-item' + (tab.isActive ? ' active' : '');
+    btn.dataset.key = tabItemKey(tab);
+    btn.textContent = tab.title || `Chat ${index + 1}`;
+    btn.addEventListener('click', () => emitSwitchTab(tab));
+    bindTabContextMenu(btn, tab);
+    return btn;
+  }
+
   function renderTabs() {
     const tabs = state.chatTabs || [];
     if (tabs.length <= 1) {
@@ -1677,34 +1762,33 @@
     }
     $tabBar.classList.remove('hidden');
 
-    const existingBtns = $tabList.querySelectorAll('.tab-item');
-    const existingMap = new Map();
-    existingBtns.forEach(b => existingMap.set(b.dataset.title, b));
+    const openTabs = tabs.filter(t => t.source === 'open');
+    const sidebarTabs = tabs.filter(t => t.source !== 'open');
 
-    const newTitles = new Set(tabs.map(t => t.title));
-    existingBtns.forEach(b => {
-      if (!newTitles.has(b.dataset.title)) b.remove();
-    });
+    $tabList.replaceChildren();
 
-    tabs.forEach((tab, i) => {
-      let btn = existingMap.get(tab.title);
-      if (!btn) {
-        btn = document.createElement('button');
-        btn.className = 'tab-item';
-        btn.dataset.title = tab.title;
-        btn.addEventListener('click', () => {
-          socket.emit('command:switch_tab', {
-            commandId: newCommandId(),
-            tabTitle: tab.title,
-            selectorPath: tab.selectorPath,
-          });
-        });
-        $tabList.appendChild(btn);
-      }
+    if (openTabs.length > 0) {
+      const openLabel = document.createElement('span');
+      openLabel.className = 'tab-group-label';
+      openLabel.textContent = 'Aktivní';
+      $tabList.appendChild(openLabel);
+      openTabs.forEach((tab, i) => $tabList.appendChild(createTabButton(tab, i)));
+    }
 
-      btn.className = 'tab-item' + (tab.isActive ? ' active' : '');
-      btn.textContent = tab.title || `Chat ${i + 1}`;
-    });
+    if (openTabs.length > 0 && sidebarTabs.length > 0) {
+      const divider = document.createElement('span');
+      divider.className = 'tab-group-divider';
+      divider.setAttribute('aria-hidden', 'true');
+      $tabList.appendChild(divider);
+    }
+
+    if (sidebarTabs.length > 0) {
+      const listLabel = document.createElement('span');
+      listLabel.className = 'tab-group-label';
+      listLabel.textContent = 'Seznam';
+      $tabList.appendChild(listLabel);
+      sidebarTabs.forEach((tab, i) => $tabList.appendChild(createTabButton(tab, i)));
+    }
   }
 
   function escapeHtml(str) {
@@ -1778,7 +1862,9 @@
     $sheetMode.classList.add('hidden');
     $sheetModel.classList.add('hidden');
     $sheetPlanModel.classList.add('hidden');
+    $sheetTab.classList.add('hidden');
     activeSheet = null;
+    tabSheetTab = null;
   }
 
   function renderModeSheet() {

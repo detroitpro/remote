@@ -460,7 +460,7 @@ export class Relay {
       });
 
       socket.on('command:switch_tab', async (payload: CommandPayload) => {
-        if (!payload.commandId || (!payload.tabTitle && !payload.selectorPath)) {
+        if (!payload.commandId || (!payload.tabTitle && !payload.selectorPath && !payload.composerId)) {
           socket.emit('command:result', {
             commandId: payload.commandId ?? 'unknown',
             ok: false,
@@ -468,11 +468,32 @@ export class Relay {
           } satisfies CommandResult);
           return;
         }
-        console.log(`[relay] Command: switch_tab to "${payload.tabTitle ?? payload.selectorPath}" from ${socket.id}`);
+        console.log(`[relay] Command: switch_tab to "${payload.tabTitle ?? payload.composerId ?? payload.selectorPath}" from ${socket.id}`);
         const result = await this.commandExecutor.switchTab(
           payload.commandId,
           payload.tabTitle ?? '',
-          payload.selectorPath
+          payload.selectorPath,
+          payload.composerId,
+          payload.tabSource
+        );
+        socket.emit('command:result', result);
+      });
+
+      socket.on('command:close_tab', async (payload: CommandPayload) => {
+        if (!payload.commandId || (!payload.tabTitle && !payload.composerId)) {
+          socket.emit('command:result', {
+            commandId: payload.commandId ?? 'unknown',
+            ok: false,
+            error: 'Missing commandId and tab target',
+          } satisfies CommandResult);
+          return;
+        }
+        console.log(`[relay] Command: close_tab "${payload.tabTitle ?? payload.composerId}" from ${socket.id}`);
+        const result = await this.commandExecutor.closeTab(
+          payload.commandId,
+          payload.tabTitle ?? '',
+          payload.composerId,
+          payload.tabSource
         );
         socket.emit('command:result', result);
       });
