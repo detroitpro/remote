@@ -21,6 +21,13 @@ npx tsx scripts/probe-tabs.ts [--window <název>]
 2. **Web klient** (`src/client/`): statické soubory — stačí **obnovit prohlížeč** na `http://localhost:3001`.
 3. **DOM extrakce / příkazy**: vyžaduje běžící Cursor s CDP (`cursorRemote.cdpUrl`, typicky `http://127.0.0.1:9222` nebo `19222`).
 
+## Před spuštěním testů
+
+- Než agent spustí testy nebo build jako ověření, musí uživatele předem stručně upozornit, jestli změna zasahuje:
+  - **extension** (`extension/`), nebo
+  - jen **server / web GUI** (`src/server/`, `src/client/`).
+- Cílem je, aby bylo před testováním jasné, kterou část systému se chystá ověřovat.
+
 ## Vizuální kontrola v prohlížeči
 
 Po změnách web UI **otevři a zkontroluj sám** `http://localhost:3001` (browser automation / Simple Browser v IDE):
