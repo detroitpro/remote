@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import type { ChatElement, CursorState, CursorWindow } from './types.js';
 import type { GitSnapshotPushPayload, GitStatusInfo, GitWindowSnapshot } from '../shared/extension-bridge.js';
+import type { GitScmSnapshot } from '../shared/git-scm.js';
 import type { GitSnapshotStoreDiagnostics } from '../shared/diagnostics.js';
 import { AGENT_ACTIVITY_STALE_MS, BACKGROUND_TASKS_STALE_MS } from './activity-stale.js';
 import { filterActionableApprovals } from './approval-filter.js';
@@ -69,6 +70,7 @@ function emptyState(): CursorState {
     questionnaire: null,
     backgroundTasks: [],
     gitStatus: null,
+    gitScm: null,
     agentStopSelectorPath: '',
     agentStopAvailable: false,
     agentStopSource: 'none',
@@ -163,6 +165,7 @@ export class StateManager extends EventEmitter {
     newState.windows = this.currentState.windows;
     newState.activeWindowId = this.currentState.activeWindowId;
     newState.gitStatus = this.currentState.gitStatus;
+    newState.gitScm = this.currentState.gitScm;
     newState.pendingApprovals = filterActionableApprovals(newState.pendingApprovals);
     if (newState.pendingApprovals.length === 0 && newState.agentStatus === 'waiting_approval') {
       newState.agentStatus = 'idle';
@@ -333,7 +336,8 @@ export class StateManager extends EventEmitter {
     this.currentState = { ...this.currentState, windows, activeWindowId };
     const gitPatch = this.syncGitStatusForActiveWindow();
     const patch: Partial<CursorState> = { windows, activeWindowId };
-    if (gitPatch) patch.gitStatus = gitPatch;
+    if (gitPatch?.gitStatus !== undefined) patch.gitStatus = gitPatch.gitStatus;
+    if (gitPatch?.gitScm !== undefined) patch.gitScm = gitPatch.gitScm;
     this.emit('state:patch', patch);
   }
 
@@ -361,17 +365,27 @@ export class StateManager extends EventEmitter {
       windowKey: payload.windowKey,
       gitStatus: { ...payload.gitStatus, windowKey: payload.windowKey },
       repoBreakdown: payload.repoBreakdown,
+      gitScm: payload.gitScm ?? null,
       updatedAt: payload.updatedAt,
       extensionInstanceId: payload.extensionInstanceId,
     };
     this.gitWindowSnapshots.set(payload.windowKey, snapshot);
     this.lastGitPushAt = Date.now();
     this.lastGitPushWindowKey = payload.windowKey;
-    const gitStatus = this.syncGitStatusForActiveWindow();
-    if (gitStatus !== undefined) {
-      this.emit('state:patch', { gitStatus: gitStatus ?? null });
+    const syncResult = this.syncGitStatusForActiveWindow();
+    if (syncResult) {
+      const patch: Partial<CursorState> = {};
+      if (syncResult.gitStatus !== undefined) patch.gitStatus = syncResult.gitStatus;
+      if (syncResult.gitScm !== undefined) patch.gitScm = syncResult.gitScm;
+      if (Object.keys(patch).length > 0) {
+        this.emit('state:patch', patch);
+      }
     }
-    return gitStatus ?? null;
+    return syncResult?.gitStatus ?? null;
+  }
+
+  getActiveGitScmSnapshot(): GitScmSnapshot | null {
+    return this.pickGitSnapshotForActiveWindow()?.gitScm ?? null;
   }
 
   getGitSnapshotDiagnostics(activeWindowTitle: string | null): GitSnapshotStoreDiagnostics {
@@ -416,27 +430,49 @@ export class StateManager extends EventEmitter {
     return snapshot;
   }
 
-  private syncGitStatusForActiveWindow(): GitStatusInfo | null | undefined {
+  private syncGitStatusForActiveWindow(): {
+    gitStatus: GitStatusInfo | null | undefined;
+    gitScm: GitScmSnapshot | null | undefined;
+  } | undefined {
     const snapshot = this.pickGitSnapshotForActiveWindow();
     if (snapshot) {
       this.activeGitWindowKey = snapshot.windowKey;
       const nextGitStatus = snapshot.gitStatus;
-      if (JSON.stringify(this.currentState.gitStatus) === JSON.stringify(nextGitStatus)) {
+      const nextGitScm = snapshot.gitScm ?? null;
+      const statusSame = JSON.stringify(this.currentState.gitStatus) === JSON.stringify(nextGitStatus);
+      const scmSame = JSON.stringify(this.currentState.gitScm) === JSON.stringify(nextGitScm);
+      if (statusSame && scmSame) {
         return undefined;
       }
-      this.currentState = { ...this.currentState, gitStatus: nextGitStatus };
-      return nextGitStatus;
+      this.currentState = {
+        ...this.currentState,
+        gitStatus: nextGitStatus,
+        gitScm: nextGitScm,
+      };
+      return {
+        gitStatus: statusSame ? undefined : nextGitStatus,
+        gitScm: scmSame ? undefined : nextGitScm,
+      };
     }
 
     this.activeGitWindowKey = null;
     if (this.currentState.gitStatus !== null && this.gitWindowSnapshots.size > 0) {
       return undefined;
     }
-    if (this.currentState.gitStatus === null) {
+    const statusChanged = this.currentState.gitStatus !== null;
+    const scmChanged = this.currentState.gitScm !== null;
+    if (!statusChanged && !scmChanged) {
       return undefined;
     }
-    this.currentState = { ...this.currentState, gitStatus: null };
-    return null;
+    this.currentState = {
+      ...this.currentState,
+      gitStatus: null,
+      gitScm: null,
+    };
+    return {
+      gitStatus: statusChanged ? null : undefined,
+      gitScm: scmChanged ? null : undefined,
+    };
   }
 
   private diff(
@@ -548,6 +584,11 @@ export class StateManager extends EventEmitter {
 
     if (JSON.stringify(prev.gitStatus) !== JSON.stringify(next.gitStatus)) {
       patch.gitStatus = next.gitStatus;
+      hasChange = true;
+    }
+
+    if (JSON.stringify(prev.gitScm) !== JSON.stringify(next.gitScm)) {
+      patch.gitScm = next.gitScm;
       hasChange = true;
     }
 

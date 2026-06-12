@@ -1,4 +1,6 @@
 import type { GitBridgeRepoDebugInfo, GitSnapshotReason } from './diagnostics.js';
+import { buildGitScmSnapshot } from './git-file-list.js';
+import type { GitScmSnapshot } from './git-scm.js';
 import {
   countGitChanges,
   countGitChangesAcrossRepositories,
@@ -28,6 +30,7 @@ export interface GitWindowSnapshotData {
   windowKey: string;
   repoBreakdown: GitBridgeRepoDebugInfo[];
   repoSnapshots: GitRepoSnapshot[];
+  gitScm: GitScmSnapshot | null;
   updatedAt: number;
   reason: GitSnapshotReason;
 }
@@ -38,6 +41,7 @@ export interface UnavailableGitWindowSnapshotData {
   windowKey: string;
   repoBreakdown: [];
   repoSnapshots: [];
+  gitScm: null;
   updatedAt: number;
   reason: GitSnapshotReason;
 }
@@ -128,6 +132,7 @@ export function buildUnavailableWindowSnapshot(
     windowKey,
     repoBreakdown: [],
     repoSnapshots: [],
+    gitScm: null,
     updatedAt,
     reason,
   };
@@ -159,6 +164,14 @@ export function buildWindowSnapshot(
     merge: snapshot.merge,
   }));
   const changedCount = countGitChangesAcrossRepositories(repositories.map(repo => repo.state));
+  const baseSignature = JSON.stringify({
+    windowKey,
+    available: true,
+    changedCount,
+    repoLabel,
+    repoBreakdown,
+  });
+  const gitScm = buildGitScmSnapshot(repositories, windowKey, updatedAt, baseSignature);
 
   return {
     available: true,
@@ -167,6 +180,7 @@ export function buildWindowSnapshot(
     windowKey,
     repoBreakdown,
     repoSnapshots,
+    gitScm,
     updatedAt,
     reason,
   };
@@ -179,6 +193,9 @@ export function snapshotSignature(data: GitWindowSnapshotResult): string {
     changedCount: data.changedCount,
     repoLabel: data.available ? data.repoLabel : undefined,
     repoBreakdown: data.repoBreakdown,
+    files: data.available
+      ? (data.gitScm?.files ?? []).map(file => `${file.fileId}:${file.status}:${file.bucket}`).sort()
+      : [],
   });
 }
 

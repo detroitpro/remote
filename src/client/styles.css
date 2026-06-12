@@ -2646,3 +2646,250 @@ header {
   margin-left: 6px;
   opacity: 0.75;
 }
+
+/* --- Git review --- */
+
+.git-review-sheet {
+  max-height: min(85dvh, 720px);
+}
+
+.git-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.git-review-header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.git-review-icon-btn {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.git-review-summary {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 16px;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.git-review-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.git-repo-picker {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 0 16px 8px;
+}
+
+.git-repo-chip {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.git-repo-chip.active {
+  border-color: rgba(100, 180, 255, 0.6);
+  background: rgba(100, 180, 255, 0.12);
+}
+
+.git-segment-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 0 16px 10px;
+}
+
+.git-segment {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  border-radius: 10px;
+  padding: 8px 6px;
+  font-size: 12px;
+}
+
+.git-segment.active {
+  border-color: rgba(100, 180, 255, 0.55);
+  background: rgba(100, 180, 255, 0.1);
+}
+
+.git-conflict-alert {
+  margin: 0 16px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 120, 80, 0.12);
+  border: 1px solid rgba(255, 120, 80, 0.35);
+  font-size: 12px;
+}
+
+.git-file-list {
+  max-height: 50dvh;
+  overflow-y: auto;
+}
+
+.git-file-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.git-file-row-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 12px 16px;
+}
+
+.git-file-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.git-file-badge--staged { background: rgba(80, 200, 120, 0.18); }
+.git-file-badge--changes { background: rgba(100, 180, 255, 0.18); }
+.git-file-badge--untracked { background: rgba(180, 180, 180, 0.15); }
+.git-file-badge--conflicts { background: rgba(255, 120, 80, 0.2); }
+
+.git-file-path {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-file-status {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.git-file-row-actions {
+  display: flex;
+  align-items: center;
+  padding-right: 8px;
+}
+
+.git-file-action {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.git-diff-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+
+.git-diff-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.git-diff-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #181818;
+}
+
+.git-diff-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.git-diff-back,
+.git-diff-stage-btn {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.git-diff-title-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.git-diff-title {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-diff-meta {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.git-diff-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 0 16px;
+}
+
+.git-diff-hunk-header {
+  padding: 6px 12px;
+  font-size: 11px;
+  opacity: 0.7;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.git-diff-hint,
+.git-diff-error {
+  padding: 12px 16px;
+  font-size: 13px;
+}
+
+.git-diff-error {
+  color: #ff8a80;
+}
+
+.git-diff-more {
+  display: block;
+  margin: 12px auto;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  border-radius: 8px;
+  padding: 8px 14px;
+}
+

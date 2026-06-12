@@ -143,13 +143,10 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
     }
   }, [addImageFile, inputDisabled]);
 
-  const openSourceControl = useCallback(async () => {
+  const openGitReview = useCallback(() => {
     if (!gitStatus) return;
-    const result = await command.sendCommandAwaitResult('command:open_source_control');
-    if (!result.ok) {
-      ui.showToast(result.error || 'Failed to open Source Control', 'error');
-    }
-  }, [command, gitStatus, ui]);
+    ui.openGitSheet();
+  }, [gitStatus, ui]);
 
   return (
     <footer id="input-bar">
@@ -169,8 +166,8 @@ export function ComposerInput({ state, setSendPending }: ComposerInputProps) {
               id="pill-git-status"
               className={`git-status-pill${gitStatus.changedCount === 0 ? ' count-pill-idle' : ''}`}
               type="button"
-              aria-label={`Open Source Control (${gitStatus.changedCount} changed file${gitStatus.changedCount === 1 ? '' : 's'})`}
-              onClick={() => void openSourceControl()}
+              aria-label={`Git review (${gitStatus.changedCount} changed file${gitStatus.changedCount === 1 ? '' : 's'})`}
+              onClick={openGitReview}
             >
               F:{gitStatus.changedCount}
             </button>

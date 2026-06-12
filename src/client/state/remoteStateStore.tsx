@@ -24,6 +24,7 @@ export const defaultCursorState: CursorState = {
   questionnaire: null,
   backgroundTasks: [],
   gitStatus: null,
+  gitScm: null,
   agentStopSelectorPath: '',
   agentStopAvailable: false,
   agentStopSource: 'none',

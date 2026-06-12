@@ -1,7 +1,8 @@
 import { createContext, useContext } from 'react';
 import type { BackgroundTask, ComposerQueueItem, PlanBlock } from '../../server/types.js';
+import type { GitFileSummary } from '../../shared/git-scm.js';
 
-export type SheetType = 'mode' | 'model' | 'plan-model' | 'tab' | 'queue' | 'background-tasks' | 'debug' | null;
+export type SheetType = 'mode' | 'model' | 'plan-model' | 'tab' | 'queue' | 'background-tasks' | 'debug' | 'git' | null;
 
 export interface ToastMessage {
   id: string;
@@ -18,6 +19,7 @@ export interface UiState {
   planModalBody: string;
   toasts: ToastMessage[];
   backgroundTaskContext: BackgroundTask | null;
+  gitDiffFile: GitFileSummary | null;
 }
 
 export interface UiActions {
@@ -31,6 +33,9 @@ export interface UiActions {
   setPlanModalBody(body: string): void;
   showToast(message: string, type?: 'success' | 'error'): void;
   removeToast(id: string): void;
+  openGitSheet(): void;
+  openGitDiff(file: GitFileSummary): void;
+  closeGitDiff(): void;
 }
 
 export const UiStateContext = createContext<(UiState & UiActions) | null>(null);

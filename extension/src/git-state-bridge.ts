@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatch
 import type { UnifiedOutputChannel } from './output-channel.js';
 import type { ServerManager } from './server-manager.js';
 import { GitSnapshotProvider } from './git-snapshot-provider.js';
+import { GitActionExecutor } from './git-action-executor.js';
 import type {
   GitSnapshotPushPayload,
   GitStatusInfo,
@@ -12,7 +13,10 @@ import type {
 import {
   openSourceControlRequestPath,
   openSourceControlResultPath,
+  gitActionRequestPath,
+  gitActionResultPath,
 } from '../../src/shared/extension-bridge.js';
+import type { GitActionRequest, GitActionResult, GitScmSnapshot } from '../../src/shared/git-scm.js';
 import type { GitSnapshotReason } from '../../src/shared/diagnostics.js';
 import { snapshotSignature, type GitWindowSnapshotResult } from '../../src/shared/git-snapshot.js';
 import { resolveWorkspaceIdentity } from '../../src/shared/workspace-identity.js';
@@ -31,9 +35,11 @@ export class GitStateBridge implements vscode.Disposable {
   private readonly outputChannel: UnifiedOutputChannel;
   private readonly serverManager: ServerManager;
   private readonly snapshotProvider: GitSnapshotProvider;
+  private readonly gitActionExecutor: GitActionExecutor;
   private readonly onDidChangeLocalGitStatusEmitter = new vscode.EventEmitter<void>();
   private requestWatcher: FSWatcher | null = null;
   private lastRequestId = '';
+  private lastGitActionRequestId = '';
   private lastPushedSignature = '';
   private lastSeenServerInstanceId: string | null = null;
   private lastLocalSnapshot: GitWindowSnapshotResult | null = null;
@@ -60,6 +66,10 @@ export class GitStateBridge implements vscode.Disposable {
       resolveRepoLabel: () => this.resolveRepoLabel(),
       resolveWorkspaceFolderPath: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null,
     });
+    this.gitActionExecutor = new GitActionExecutor(
+      this.snapshotProvider,
+      () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null,
+    );
   }
 
   start(): void {
@@ -74,6 +84,7 @@ export class GitStateBridge implements vscode.Disposable {
 
     this.serverManager.on('stateChanged', () => {
       void this.handleOpenSourceControlRequest();
+      void this.handleGitActionRequest();
     });
     this.serverManager.on('started', () => {
       this.lastPushedSignature = '';
@@ -85,11 +96,16 @@ export class GitStateBridge implements vscode.Disposable {
 
     void this.snapshotProvider.start();
     void this.handleOpenSourceControlRequest();
+    void this.handleGitActionRequest();
 
     try {
       this.requestWatcher = watch(dataDir, (_eventType, filename) => {
-        if (filename !== 'open-source-control-request.json') return;
-        void this.handleOpenSourceControlRequest();
+        if (filename === 'open-source-control-request.json') {
+          void this.handleOpenSourceControlRequest();
+        }
+        if (filename === 'git-action-request.json') {
+          void this.handleGitActionRequest();
+        }
       });
     } catch (err) {
       this.outputChannel.warn(`[git-bridge] Failed to watch ${dataDir}: ${err instanceof Error ? err.message : String(err)}`);
@@ -174,6 +190,7 @@ export class GitStateBridge implements vscode.Disposable {
       gitStatus,
       snapshot.windowKey,
       snapshot.repoBreakdown,
+      snapshot.available ? snapshot.gitScm : null,
       snapshot.reason,
     );
   }
@@ -182,12 +199,14 @@ export class GitStateBridge implements vscode.Disposable {
     gitStatus: GitStatusInfo,
     windowKey: string,
     repoBreakdown: GitWindowSnapshotResult['repoBreakdown'],
+    gitScm: GitScmSnapshot | null,
     reason: GitSnapshotReason,
   ): Promise<void> {
     const pushPayload: GitSnapshotPushPayload = {
       windowKey,
       gitStatus,
       repoBreakdown,
+      gitScm,
       updatedAt: gitStatus.updatedAt,
       extensionInstanceId: this.extensionInstanceId,
     };
@@ -199,6 +218,7 @@ export class GitStateBridge implements vscode.Disposable {
       repoLabel: gitStatus.repoLabel,
       repoBreakdown: repoBreakdown ?? [],
       repoSnapshots: [],
+      gitScm,
       updatedAt: gitStatus.updatedAt,
       reason,
     });
@@ -287,6 +307,32 @@ export class GitStateBridge implements vscode.Disposable {
 
     writeFileSync(
       openSourceControlResultPath(this.context.globalStorageUri.fsPath),
+      JSON.stringify(result) + '\n',
+      'utf-8',
+    );
+  }
+
+  private async handleGitActionRequest(): Promise<void> {
+    if (this.disposed) return;
+    const path = gitActionRequestPath(this.context.globalStorageUri.fsPath);
+    if (!existsSync(path)) return;
+
+    let request: GitActionRequest;
+    try {
+      request = JSON.parse(readFileSync(path, 'utf-8')) as GitActionRequest;
+    } catch {
+      return;
+    }
+
+    if (!request.requestId || request.requestId === this.lastGitActionRequestId) return;
+    this.lastGitActionRequestId = request.requestId;
+
+    const result = await this.gitActionExecutor.execute(request);
+    if (result.ok && (request.action === 'stage' || request.action === 'unstage')) {
+      this.snapshotProvider.emitCurrentSnapshot('state-change');
+    }
+    writeFileSync(
+      gitActionResultPath(this.context.globalStorageUri.fsPath),
       JSON.stringify(result) + '\n',
       'utf-8',
     );

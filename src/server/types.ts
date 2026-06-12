@@ -1,4 +1,5 @@
 import type { GitStatusInfo } from '../shared/extension-bridge.js';
+import type { GitScmSnapshot } from '../shared/git-scm.js';
 
 // Core relay state and chat element typings.
 export interface CursorWindow {
@@ -144,6 +145,8 @@ export interface CursorState {
   backgroundTasks: BackgroundTask[];
   /** Git/source-control summary provided by the extension host for the owner workspace. */
   gitStatus: GitStatusInfo | null;
+  /** File-level git snapshot for mobile SCM review (active window). */
+  gitScm: GitScmSnapshot | null;
   /** Best-known stop/cancel action for the active agent, if Cursor exposes one. */
   agentStopSelectorPath: string;
   /** True only when a real Stop control exists in Cursor DOM right now. */

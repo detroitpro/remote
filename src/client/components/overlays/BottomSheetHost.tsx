@@ -9,6 +9,8 @@ import { ModelSheet } from './sheets/ModelSheet.js';
 import { PlanModelSheet } from './sheets/PlanModelSheet.js';
 import { QueueActionsSheet } from './sheets/QueueActionsSheet.js';
 import { TabActionsSheet } from './sheets/TabActionsSheet.js';
+import { GitReviewSheet } from '../git/GitReviewSheet.js';
+import { GitDiffOverlay } from '../git/GitDiffOverlay.js';
 
 export interface BottomSheetHostProps {
   state: CursorState;
@@ -41,6 +43,8 @@ export function BottomSheetHost({
         socketConnected={socketConnected}
         sendPending={sendPending}
       />
+      <GitReviewSheet state={state} visible={active === 'git'} />
+      <GitDiffOverlay file={ui.gitDiffFile} snapshotId={state.gitScm?.snapshotId ?? null} onClose={ui.closeGitDiff} />
     </>
   );
 }

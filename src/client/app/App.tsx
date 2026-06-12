@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CommandResult, ComposerQueueItem, CursorState, PlanBlock } from '../../server/types.js';
+import type { GitFileSummary } from '../../shared/git-scm.js';
 import { CursorRemoteShell } from '../components/layout/CursorRemoteShell.js';
 import { CommandClientContext, useCreateCommandClient } from '../state/commandClient.js';
 import { defaultCursorState, mergeCursorPatch, RemoteStateContext } from '../state/remoteStateStore.js';
@@ -26,6 +27,7 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
   const [planModalBody, setPlanModalBody] = useState('');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [sendPending, setSendPending] = useState(false);
+  const [gitDiffFile, setGitDiffFile] = useState<GitFileSummary | null>(null);
 
   const showToast = useCallback((message: string, type?: 'success' | 'error') => {
     const id = newCommandId();
@@ -124,6 +126,7 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
     planModalBody,
     toasts,
     backgroundTaskContext: null,
+    gitDiffFile,
     openSheet: (type: SheetType) => setActiveSheet(type),
     closeSheet: () => setActiveSheet(null),
     openQueueSheet: (item: ComposerQueueItem) => {
@@ -149,7 +152,10 @@ export function App({ socket: providedSocket, skipAuth = false }: AppProps) {
     setPlanModalBody,
     showToast,
     removeToast: (id: string) => setToasts(items => items.filter(item => item.id !== id)),
-  }), [activePlanModal, activeSheet, planModalBody, planModelContext, queueSheetItem, showToast, tabSheetComposerId, toasts]);
+    openGitSheet: () => setActiveSheet('git'),
+    openGitDiff: (file) => setGitDiffFile(file),
+    closeGitDiff: () => setGitDiffFile(null),
+  }), [activePlanModal, activeSheet, gitDiffFile, planModalBody, planModelContext, queueSheetItem, showToast, tabSheetComposerId, toasts]);
 
   if (!authReady) return null;
 

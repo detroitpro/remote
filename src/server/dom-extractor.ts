@@ -2129,6 +2129,7 @@ export function extractionFunction(
       questionnaire,
       backgroundTasks,
       gitStatus: null,
+      gitScm: null,
       agentStopSelectorPath,
       agentStopAvailable,
       agentStopSource,

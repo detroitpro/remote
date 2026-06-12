@@ -35,10 +35,10 @@ interface GitRepositoryState {
       name: string;
     };
   };
-  workingTreeChanges: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri }>;
-  indexChanges: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri }>;
-  mergeChanges: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri }>;
-  untrackedChanges?: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri }>;
+  workingTreeChanges: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri; renameUri?: vscode.Uri; originalUri?: vscode.Uri; status?: number }>;
+  indexChanges: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri; renameUri?: vscode.Uri; originalUri?: vscode.Uri; status?: number }>;
+  mergeChanges: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri; renameUri?: vscode.Uri; originalUri?: vscode.Uri; status?: number }>;
+  untrackedChanges?: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri; renameUri?: vscode.Uri; originalUri?: vscode.Uri; status?: number }>;
   onDidChange: vscode.Event<void>;
 }
 
@@ -182,6 +182,10 @@ export class GitSnapshotProvider implements vscode.Disposable {
       gitExplicitRefreshCount: this.explicitRefreshCount,
       lastError: this.lastError,
     };
+  }
+
+  getGitApiSync(): GitExtensionApi | null {
+    return this.gitApi;
   }
 
   dispose(): void {

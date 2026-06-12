@@ -476,6 +476,7 @@ describe('web: attachments', () => {
       questionnaire: null,
       backgroundTasks: [],
       gitStatus: null,
+      gitScm: null,
       agentStopSelectorPath: '',
       agentStopAvailable: false,
       agentStopSource: 'none',
@@ -551,6 +552,7 @@ describe('web: background tasks', () => {
       questionnaire: null,
       backgroundTasks: [],
       gitStatus: null,
+      gitScm: null,
       agentStopSelectorPath: '',
       agentStopAvailable: false,
       agentStopSource: 'none',
@@ -703,6 +705,7 @@ describe('web: git status', () => {
       questionnaire: null,
       backgroundTasks: [],
       gitStatus: null,
+      gitScm: null,
       agentStopSelectorPath: '',
       agentStopAvailable: false,
       agentStopSource: 'none',
@@ -710,7 +713,7 @@ describe('web: git status', () => {
     };
   }
 
-  it('shows git count and opens source control', async () => {
+  it('shows git count and opens git review sheet', async () => {
     fireFullState(env.mockSocket, {
       ...baseState(),
       gitStatus: {
@@ -719,6 +722,35 @@ describe('web: git status', () => {
         repoLabel: 'cursor-ide-remote',
         updatedAt: Date.now(),
         source: 'vscode.git',
+      },
+      gitScm: {
+        version: 2,
+        snapshotId: 'git:test:1:abc',
+        updatedAt: Date.now(),
+        windowKey: 'cursor-ide-remote',
+        repos: [{
+          repoId: 'repo:abc',
+          rootUri: 'file:///workspace/repo',
+          label: 'repo',
+          branch: 'main',
+          ahead: 0,
+          behind: 0,
+          counts: { staged: 1, changes: 2, conflicts: 0, untracked: 0 },
+        }],
+        files: [{
+          fileId: 'repo:abc|changes|src/a.ts',
+          repoId: 'repo:abc',
+          bucket: 'changes',
+          path: 'src/a.ts',
+          originalPath: null,
+          displayPath: 'src/a.ts',
+          status: 'MODIFIED',
+          isRename: false,
+          isBinary: false,
+          isLarge: false,
+          isConflict: false,
+          updatedAt: Date.now(),
+        }],
       },
     });
 
@@ -730,11 +762,10 @@ describe('web: git status', () => {
       pill.click();
     });
 
-    const sent = env.mockSocket.emitted.find(item => item.event === 'command:open_source_control');
-    assert.ok(sent, 'Expected git pill to emit open_source_control');
-
-    const commandId = String((sent.args[0] as { commandId: string }).commandId);
-    act(() => env.mockSocket.fire('command:result', { commandId, ok: true }));
+    const sheet = env.document.getElementById('sheet-git-review');
+    assert.ok(sheet, 'Expected git review sheet to open');
+    assert.ok(!sheet!.classList.contains('hidden'));
+    assert.ok(env.document.querySelector('.git-file-row'), 'Expected at least one git file row');
   });
 
   it('keeps git pill visible for clean repositories', () => {
@@ -773,6 +804,7 @@ describe('web: debug panel', () => {
         clientBuild: 'vite-dev',
       },
       gitStatus: null,
+      gitScm: null,
       gitSnapshots: {
         activeWindowKey: 'cursor-ide-remote',
         activeWindowTitle: 'cursor-ide-remote',
@@ -881,6 +913,7 @@ describe('web: questionnaire widget integration', () => {
       questionnaire: null,
       backgroundTasks: [],
       gitStatus: null,
+      gitScm: null,
       agentStopSelectorPath: '',
       agentStopAvailable: false,
       agentStopSource: 'none',

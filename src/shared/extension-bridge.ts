@@ -1,5 +1,6 @@
 import { join } from 'path';
 import type { GitBridgeRepoDebugInfo } from './diagnostics.js';
+import type { GitScmSnapshot } from './git-scm.js';
 
 export interface GitStatusInfo {
   available: boolean;
@@ -15,6 +16,7 @@ export interface GitWindowSnapshot {
   windowKey: string;
   gitStatus: GitStatusInfo;
   repoBreakdown?: GitBridgeRepoDebugInfo[];
+  gitScm?: GitScmSnapshot | null;
   updatedAt: number;
   extensionInstanceId?: string;
 }
@@ -23,6 +25,7 @@ export interface GitSnapshotPushPayload {
   windowKey: string;
   gitStatus: GitStatusInfo;
   repoBreakdown?: GitBridgeRepoDebugInfo[];
+  gitScm?: GitScmSnapshot | null;
   updatedAt: number;
   extensionInstanceId?: string;
 }
@@ -50,4 +53,17 @@ export function openSourceControlRequestPath(dataDir: string): string {
 
 export function openSourceControlResultPath(dataDir: string): string {
   return join(dataDir, OPEN_SOURCE_CONTROL_RESULT_FILENAME);
+}
+
+export {
+  GIT_ACTION_REQUEST_FILENAME,
+  GIT_ACTION_RESULT_FILENAME,
+} from './git-scm.js';
+
+export function gitActionRequestPath(dataDir: string): string {
+  return join(dataDir, 'git-action-request.json');
+}
+
+export function gitActionResultPath(dataDir: string): string {
+  return join(dataDir, 'git-action-result.json');
 }

@@ -31,6 +31,7 @@ export function baseCursorState(overrides: Partial<CursorState> = {}): CursorSta
     questionnaire: null,
     backgroundTasks: [],
     gitStatus: null,
+    gitScm: null,
     agentStopSelectorPath: '',
     agentStopAvailable: false,
     agentStopSource: 'none',

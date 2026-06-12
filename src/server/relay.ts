@@ -17,6 +17,8 @@ import type { ExtensionFileBridge } from './extension-file-bridge.js';
 import { SERVER_INSTANCE, getServerModuleDir } from './server-info.js';
 import type { ServerDiagnostics } from '../shared/diagnostics.js';
 import { GIT_SNAPSHOT_PUSH_PATH, type GitSnapshotPushPayload } from '../shared/extension-bridge.js';
+import { GIT_SNAPSHOT_STALE_ERROR } from '../shared/git-scm.js';
+import { GitScmService, parseBucketQuery, parseBucketsQuery } from './git/git-scm-service.js';
 import {
   WEBAPP_SESSION_COOKIE,
   createWebappSessionStore,
@@ -148,6 +150,7 @@ export class Relay {
   private commandExecutor: CommandExecutor;
   private cdpBridge: CDPBridge;
   private extensionBridge: ExtensionFileBridge;
+  private gitScmService: GitScmService;
   private storageHistory: CursorStorageHistory;
   private viteDevServer?: Promise<ViteDevServer>;
   private requestFreshExtraction: () => void;
@@ -177,6 +180,7 @@ export class Relay {
     this.commandExecutor = commandExecutor;
     this.cdpBridge = cdpBridge;
     this.extensionBridge = extensionBridge;
+    this.gitScmService = new GitScmService(stateManager, extensionBridge);
     this.requestFreshExtraction = requestFreshExtraction;
     this.storageHistory = new CursorStorageHistory(config.cursorStateDbPath);
     this.sessionStore = createWebappSessionStore(config.dataDir);
@@ -349,7 +353,11 @@ export class Relay {
           updatedAt: payload.updatedAt || Date.now(),
           windowKey: payload.windowKey.trim(),
         },
+        gitScm: payload.gitScm ?? null,
       });
+      if (payload.gitScm) {
+        this.gitScmService.invalidateDiffCache();
+      }
       res.json({ ok: true, gitStatus });
     });
 
@@ -449,6 +457,7 @@ export class Relay {
         agentStopSource: state.agentStopSource,
         pendingApprovals: state.pendingApprovals,
         gitStatus: state.gitStatus,
+        gitScm: state.gitScm,
         chatTabs: state.chatTabs.map((t) => ({
           isActive: t.isActive,
           title: t.title,
@@ -465,6 +474,98 @@ export class Relay {
         })),
         generation: this.stateManager.generation,
       });
+    });
+
+    this.app.get('/api/git/repos', async (req, res) => {
+      if (this.authEnabled && this.resolveHttpSession(req) === undefined) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      res.json(this.gitScmService.getRepos());
+    });
+
+    this.app.get('/api/git/files', async (req, res) => {
+      if (this.authEnabled && this.resolveHttpSession(req) === undefined) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      try {
+        const repoId = typeof req.query.repoId === 'string' ? req.query.repoId : undefined;
+        const bucket = parseBucketQuery(typeof req.query.bucket === 'string' ? req.query.bucket : undefined);
+        const buckets = parseBucketsQuery(typeof req.query.buckets === 'string' ? req.query.buckets : undefined);
+        const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+        const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
+        res.json(this.gitScmService.listFiles({ repoId, bucket, buckets, cursor, limit }));
+      } catch (err) {
+        res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    this.app.get('/api/git/files/:fileId/diff', async (req, res) => {
+      if (this.authEnabled && this.resolveHttpSession(req) === undefined) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      try {
+        const fileId = decodeURIComponent(req.params.fileId);
+        const stage = req.query.stage === 'index' ? 'index' : 'working';
+        const hunkCursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
+        const snapshotId = typeof req.query.snapshotId === 'string' ? req.query.snapshotId : undefined;
+        const diff = await this.gitScmService.getDiff({ fileId, snapshotId, stage, hunkCursor });
+        res.json(diff);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        let status = 500;
+        if (message.includes('Unknown fileId') || message.includes('Invalid')) status = 400;
+        if (message === GIT_SNAPSHOT_STALE_ERROR) status = 409;
+        res.status(status).json({ error: message });
+      }
+    });
+
+    this.app.post('/api/git/stage', async (req, res) => {
+      if (this.authEnabled && this.resolveHttpSession(req) === undefined) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      const fileIds = Array.isArray(req.body?.fileIds) ? req.body.fileIds as string[] : [];
+      const requestId = typeof req.body?.requestId === 'string'
+        ? req.body.requestId
+        : `stage-${Date.now()}`;
+      if (!fileIds.length) {
+        res.status(400).json({ error: 'fileIds required' });
+        return;
+      }
+      const result = await this.gitScmService.stageFiles(fileIds, requestId);
+      res.status(result.ok ? 200 : 400).json(result);
+    });
+
+    this.app.post('/api/git/unstage', async (req, res) => {
+      if (this.authEnabled && this.resolveHttpSession(req) === undefined) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      const fileIds = Array.isArray(req.body?.fileIds) ? req.body.fileIds as string[] : [];
+      const requestId = typeof req.body?.requestId === 'string'
+        ? req.body.requestId
+        : `unstage-${Date.now()}`;
+      if (!fileIds.length) {
+        res.status(400).json({ error: 'fileIds required' });
+        return;
+      }
+      const result = await this.gitScmService.unstageFiles(fileIds, requestId);
+      res.status(result.ok ? 200 : 400).json(result);
+    });
+
+    this.app.post('/api/git/refresh', async (req, res) => {
+      if (this.authEnabled && this.resolveHttpSession(req) === undefined) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+      const requestId = typeof req.body?.requestId === 'string'
+        ? req.body.requestId
+        : `refresh-${Date.now()}`;
+      const result = await this.gitScmService.refresh(requestId);
+      res.status(result.ok ? 200 : 500).json(result);
     });
 
     if (isSourceClient) {
