@@ -9,8 +9,9 @@ function normalizeTitle(title: string): string {
   return title.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-function isComposerUuid(value?: string): boolean {
-  return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+function isNewAgentListEntry(title: string): boolean {
+  const normalized = normalizeTitle(title);
+  return normalized === 'new agent' || normalized.endsWith(' / new agent');
 }
 
 function tabIdentity(tab: ChatTab): string {
@@ -22,12 +23,14 @@ function tabIdentity(tab: ChatTab): string {
 
 function shouldHideListTab(tab: ChatTab, openKeys: Set<string>): boolean {
   if (tab.source === 'open') return true;
+  if (isNewAgentListEntry(tab.title || '')) return true;
   if (openKeys.has(tabIdentity(tab))) return true;
 
   const normalizedTitle = normalizeTitle(tab.title || '');
   if (!normalizedTitle) return false;
-  if (!isComposerUuid(tab.composerId)) return false;
 
+  // Match by title when open editor tabs use different ids (resource-name UUID vs
+  // sidebar tab-N / glass: synthetic ids).
   return openKeys.has(`title:${normalizedTitle}`);
 }
 

@@ -67,7 +67,7 @@ describe('buildChatTabGroups', () => {
     assert.equal(groups.listTabs[0].title, 'Other work');
   });
 
-  it('keeps New Agent in list when open tab shares another conversation title', () => {
+  it('never shows New Agent in list (new chat uses the + button)', () => {
     const groups = buildChatTabGroups([
       tab({ source: 'open', composerId: 'open:Greeting conversation', title: 'Greeting conversation' }),
       tab({ source: 'sidebar', composerId: 'glass:New Agent', title: 'New Agent' }),
@@ -80,10 +80,25 @@ describe('buildChatTabGroups', () => {
     ]);
 
     assert.equal(groups.openTabs.length, 1);
-    assert.equal(groups.listTabs.length, 2);
-    assert.deepEqual(
-      groups.listTabs.map(t => t.title),
-      ['New Agent', 'Other work'],
-    );
+    assert.equal(groups.listTabs.length, 1);
+    assert.equal(groups.listTabs[0].title, 'Other work');
+  });
+
+  it('filters list tab by title when sidebar uses synthetic tab-N composerId', () => {
+    const groups = buildChatTabGroups([
+      tab({
+        source: 'open',
+        composerId: 'bac75c82-687d-4d80-96b1-531f7f1e3b0b',
+        title: 'Plánování počítání souborů v projektu',
+        isActive: true,
+      }),
+      tab({ source: 'open', composerId: 'a047ef1f-cf7d-4ded-a916-7b15e5807bcd', title: 'Greeting conversation' }),
+      tab({ source: 'sidebar', composerId: 'tab-0', title: 'New Agent' }),
+      tab({ source: 'sidebar', composerId: 'tab-1', title: 'Plánování počítání souborů v projektu' }),
+      tab({ source: 'sidebar', composerId: 'tab-2', title: 'Greeting conversation' }),
+    ]);
+
+    assert.equal(groups.openTabs.length, 2);
+    assert.equal(groups.listTabs.length, 0);
   });
 });

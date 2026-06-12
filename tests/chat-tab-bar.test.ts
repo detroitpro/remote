@@ -54,6 +54,33 @@ describe('ChatTabBar component', () => {
     assert.deepEqual(titles, ['Open chat', 'Sidebar only']);
   });
 
+  it('renders open tabs without duplicating open conversations or New Agent in list', () => {
+    env.render(React.createElement(ChatTabBar, {
+      tabs: [
+        tab({
+          source: 'open',
+          composerId: 'bac75c82-687d-4d80-96b1-531f7f1e3b0b',
+          title: 'Plánování počítání souborů v projektu',
+          isActive: true,
+        }),
+        tab({ source: 'open', composerId: 'a047ef1f-cf7d-4ded-a916-7b15e5807bcd', title: 'Greeting conversation' }),
+        tab({ source: 'sidebar', composerId: 'tab-0', title: 'New Agent' }),
+        tab({ source: 'sidebar', composerId: 'tab-1', title: 'Plánování počítání souborů v projektu' }),
+        tab({ source: 'sidebar', composerId: 'tab-2', title: 'Greeting conversation' }),
+      ],
+    }));
+
+    const bar = env.document.getElementById('tab-bar')!;
+    assert.ok(!bar.classList.contains('hidden'));
+    const labels = Array.from(bar.querySelectorAll('.tab-group-label')).map(el => el.textContent);
+    assert.deepEqual(labels, ['Open']);
+    const titles = Array.from(bar.querySelectorAll('.tab-title')).map(el => el.textContent);
+    assert.deepEqual(titles, [
+      'Plánování počítání souborů v projektu',
+      'Greeting conversation',
+    ]);
+  });
+
   it('emits switch_tab when a tab chip is clicked', () => {
     env.render(React.createElement(ChatTabBar, {
       tabs: [
