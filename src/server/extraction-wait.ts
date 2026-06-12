@@ -15,3 +15,17 @@ export async function waitForFreshExtraction(
     await sleep(200);
   }
 }
+
+/** Wait until the active chat scope changes (tab/composer switch). */
+export async function waitForHistoryScopeChange(
+  stateManager: StateManager,
+  scopeBefore: string,
+  maxWaitMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    if (stateManager.historyScopeKey() !== scopeBefore) return true;
+    await sleep(200);
+  }
+  return false;
+}

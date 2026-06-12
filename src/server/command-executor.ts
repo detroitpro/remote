@@ -1,5 +1,6 @@
 import type { CdpClient } from './cdp-client.js';
 import { attachFilesToComposer } from './message-attachments.js';
+import { parseInternalTranscriptLink } from '../shared/internal-links.js';
 import type { SelectorConfig, CommandResult, MessageAttachment, PlanModelOption } from './types.js';
 
 const MAX_RETRIES = 2;
@@ -446,6 +447,53 @@ export class CommandExecutor {
         `top ${Math.round(result.before ?? 0)} -> ${Math.round(result.after ?? 0)}, ` +
         `flat=${result.flatCount ?? 0}, h=${result.clientHeight ?? 0}/${result.scrollHeight ?? 0}`
       );
+    });
+  }
+
+  async openTranscriptLink(
+    commandId: string,
+    composerId?: string,
+    linkHref?: string,
+    linkLabel?: string,
+  ): Promise<CommandResult> {
+    const resolvedComposerId = composerId
+      || (linkHref ? parseInternalTranscriptLink(linkHref)?.composerId : undefined);
+    if (!resolvedComposerId) {
+      return { commandId, ok: false, error: 'Missing or invalid transcript link target' };
+    }
+
+    return this.withRetry(commandId, async (client) => {
+      const domClicked = await this.clickTranscriptLinkInChat(
+        client,
+        resolvedComposerId,
+        linkHref,
+        linkLabel,
+      );
+      if (domClicked) return;
+
+      const sidebarClicked = await this.clickComposerInSidebar(client, resolvedComposerId);
+      if (sidebarClicked) {
+        console.log(`[command-executor] Opened transcript via sidebar: ${resolvedComposerId}`);
+        return;
+      }
+
+      try {
+        await this.clickOpenComposerTab(client, resolvedComposerId, linkLabel);
+        console.log(`[command-executor] Opened transcript via open tab: ${resolvedComposerId}`);
+        return;
+      } catch {
+        // Fall through to title-based sidebar matching.
+      }
+
+      if (linkLabel?.trim()) {
+        const titleClicked = await this.clickSidebarTabByTitle(client, linkLabel.trim());
+        if (titleClicked) {
+          console.log(`[command-executor] Opened transcript via title fallback: ${linkLabel}`);
+          return;
+        }
+      }
+
+      throw new Error(`Transcript chat not found: ${resolvedComposerId}`);
     });
   }
 
@@ -1116,6 +1164,223 @@ export class CommandExecutor {
 
   private isComposerUuid(value?: string): boolean {
     return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  private async clickTranscriptLinkInChat(
+    client: CdpClient,
+    transcriptId: string,
+    linkHref?: string,
+    linkLabel?: string,
+  ): Promise<boolean> {
+    const containerSelectors = this.selectors.chatContainer.strategies;
+    const result = await client.evaluate(`
+      (() => {
+        const transcriptId = ${JSON.stringify(transcriptId)};
+        const linkHref = ${JSON.stringify(linkHref ?? '')};
+        const linkLabel = ${JSON.stringify(linkLabel ?? '')};
+        const containerSelectors = ${JSON.stringify(containerSelectors)};
+
+        function hrefMatches(href) {
+          const h = (href || '').trim();
+          if (!h) return false;
+          if (h === transcriptId || (linkHref && h === linkHref)) return true;
+          if (h.includes(transcriptId)) return true;
+          if (linkHref && h.includes(linkHref)) return true;
+          try {
+            const path = new URL(h, 'http://cursor.local/').pathname;
+            if (path.includes(transcriptId)) return true;
+          } catch {}
+          return false;
+        }
+
+        function norm(s) {
+          return (s || '').trim().replace(/\\s+/g, ' ').toLowerCase();
+        }
+
+        function collectAnchors(root) {
+          const out = [];
+          const seen = new Set();
+          function walk(node) {
+            if (!node || seen.has(node)) return;
+            seen.add(node);
+            if (node.querySelectorAll) {
+              for (const a of Array.from(node.querySelectorAll('a[href]'))) {
+                if (!out.includes(a)) out.push(a);
+              }
+            }
+            if (node.shadowRoot) walk(node.shadowRoot);
+            for (const child of Array.from(node.children || [])) walk(child);
+          }
+          walk(root);
+          return out;
+        }
+
+        function clickAnchor(a, via) {
+          a.scrollIntoView({ block: 'center', behavior: 'instant' });
+          const r = a.getBoundingClientRect();
+          if (r.width <= 0 || r.height <= 0) return null;
+          // Cursor transcript cites are plain <a href="uuid"> — DOM click matches IDE behavior.
+          a.click();
+          return { ok: true, via };
+        }
+
+        const roots = [];
+        for (const sel of containerSelectors) {
+          try {
+            const el = document.querySelector(sel);
+            if (el) roots.push(el);
+          } catch {}
+        }
+        if (!roots.includes(document.body)) roots.push(document.body);
+
+        const seenAnchors = new Set();
+        const anchors = [];
+        for (const root of roots) {
+          for (const a of collectAnchors(root)) {
+            if (seenAnchors.has(a)) continue;
+            seenAnchors.add(a);
+            anchors.push(a);
+          }
+        }
+
+        // Prefer the latest matching cite (usually the most recent assistant message).
+        for (let i = anchors.length - 1; i >= 0; i--) {
+          const a = anchors[i];
+          if (!hrefMatches(a.getAttribute('href') || '')) continue;
+          const clicked = clickAnchor(a, 'href');
+          if (clicked) return clicked;
+        }
+
+        if (linkLabel) {
+          const target = norm(linkLabel);
+          for (let i = anchors.length - 1; i >= 0; i--) {
+            const a = anchors[i];
+            const text = norm(a.textContent || '');
+            if (text === target || (target.length >= 6 && text.includes(target))) {
+              const clicked = clickAnchor(a, 'label');
+              if (clicked) return clicked;
+            }
+          }
+        }
+
+        return { ok: false };
+      })()
+    `) as { ok: boolean; via?: string } | null;
+
+    if (!result?.ok) return false;
+    console.log(
+      `[command-executor] Opened transcript via DOM link (${result.via ?? 'unknown'}): ${transcriptId}`,
+    );
+    return true;
+  }
+
+  private async clickComposerInSidebar(client: CdpClient, composerId: string): Promise<boolean> {
+    return await client.evaluate(`
+      (() => {
+        const composerId = ${JSON.stringify(composerId)};
+
+        const glassBtns = document.querySelectorAll(
+          '.glass-sidebar-agent-list-container li.ui-sidebar-menu-item > div.glass-sidebar-agent-menu-btn'
+        );
+        for (const btn of Array.from(glassBtns)) {
+          const cid = btn.getAttribute('data-composer-id')
+            || btn.closest('[data-composer-id]')?.getAttribute('data-composer-id');
+          if (cid === composerId) {
+            btn.click();
+            return true;
+          }
+        }
+
+        const cells = document.querySelectorAll('.agent-sidebar-cell');
+        for (const cell of Array.from(cells)) {
+          const cid = cell.getAttribute('data-composer-id')
+            || cell.closest('[data-composer-id]')?.getAttribute('data-composer-id');
+          if (cid === composerId) {
+            cell.click();
+            return true;
+          }
+        }
+
+        const matches = document.querySelectorAll('[data-composer-id="' + composerId + '"]');
+        for (const el of Array.from(matches)) {
+          const clickable = el.closest(
+            '.glass-sidebar-agent-menu-btn, .agent-sidebar-cell, .ui-sidebar-menu-item, button, [role="button"]'
+          ) || el;
+          if (clickable instanceof HTMLElement) {
+            clickable.click();
+            return true;
+          }
+        }
+
+        return false;
+      })()
+    `) as boolean;
+  }
+
+  private async clickSidebarTabByTitle(client: CdpClient, tabTitle: string): Promise<boolean> {
+    return await client.evaluate(`
+      (() => {
+        const title = ${JSON.stringify(tabTitle)};
+        const norm = s => s.trim().replace(/\\s+/g, ' ').toLowerCase();
+        const target = norm(title);
+        function cleanTabTitle(raw) {
+          let t = (raw || '').trim().replace(/\\s+/g, ' ');
+          t = t.replace(/(@[\\w./]+)+\\s*$/, '');
+          return t.trim().substring(0, 120);
+        }
+        function glassCompositeForBtn(btn) {
+          const labelEl = btn.querySelector('.ui-sidebar-menu-button-label');
+          const rawAgent = (labelEl?.textContent || '').trim();
+          if (!rawAgent) return { composite: '', agentOnly: '' };
+          const group = btn.closest('.ui-sidebar-group');
+          const gt = group?.querySelector('.ui-sidebar-group-label-title');
+          const rawGroup = (gt?.textContent || '').trim();
+          let composite = cleanTabTitle(rawAgent);
+          if (rawGroup) {
+            const g = cleanTabTitle(rawGroup);
+            if (g) composite = (g + ' / ' + cleanTabTitle(rawAgent)).substring(0, 120);
+          }
+          return { composite: norm(composite), agentOnly: norm(rawAgent) };
+        }
+        const glassBtns = Array.from(document.querySelectorAll(
+          '.glass-sidebar-agent-list-container li.ui-sidebar-menu-item > div.glass-sidebar-agent-menu-btn'
+        ));
+        if (glassBtns.length > 0) {
+          const rows = glassBtns.map((btn) => ({
+            btn,
+            ...glassCompositeForBtn(btn),
+          })).filter((r) => r.composite);
+          const byComp = rows.filter((r) => r.composite === target);
+          if (byComp.length === 1) {
+            byComp[0].btn.click();
+            return true;
+          }
+          const byAgent = rows.filter((r) => r.agentOnly === target);
+          if (byAgent.length === 1) {
+            byAgent[0].btn.click();
+            return true;
+          }
+        }
+        const cells = document.querySelectorAll('.agent-sidebar-cell');
+        for (const cell of Array.from(cells)) {
+          const titleEl = cell.querySelector('.agent-sidebar-cell-text');
+          const text = norm(titleEl ? (titleEl.textContent || '') : (cell.textContent || ''));
+          if (text === target) {
+            cell.click();
+            return true;
+          }
+        }
+        for (const cell of Array.from(cells)) {
+          const titleEl = cell.querySelector('.agent-sidebar-cell-text');
+          const text = norm(titleEl ? (titleEl.textContent || '') : (cell.textContent || ''));
+          if (text.startsWith(target) || target.startsWith(text)) {
+            cell.click();
+            return true;
+          }
+        }
+        return false;
+      })()
+    `) as boolean;
   }
 
   private async clickOpenComposerTab(

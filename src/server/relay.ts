@@ -6,7 +6,7 @@ import { basename, join, resolve } from 'path';
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import type { ServerConfig, CursorState, CommandPayload, CommandResult } from './types.js';
-import { waitForFreshExtraction } from './extraction-wait.js';
+import { waitForFreshExtraction, waitForHistoryScopeChange } from './extraction-wait.js';
 import { validateAttachments } from './message-attachments.js';
 import type { StateManager } from './state-manager.js';
 import type { CommandExecutor } from './command-executor.js';
@@ -732,6 +732,37 @@ export class Relay {
           payload.composerId,
           payload.tabSource
         );
+        socket.emit('command:result', result);
+      });
+
+      socket.on('command:open_transcript_link', async (payload: CommandPayload) => {
+        if (!payload.commandId || (!payload.composerId && !payload.linkHref)) {
+          socket.emit('command:result', {
+            commandId: payload.commandId ?? 'unknown',
+            ok: false,
+            error: 'Missing commandId and transcript link target',
+          } satisfies CommandResult);
+          return;
+        }
+        const target = payload.composerId ?? payload.linkHref ?? 'unknown';
+        console.log(`[relay] Command: open_transcript_link to "${target}" from ${socket.id}`);
+        const scopeBefore = this.stateManager.historyScopeKey();
+        const genBefore = this.stateManager.generation;
+        const result = await this.commandExecutor.openTranscriptLink(
+          payload.commandId,
+          payload.composerId,
+          payload.linkHref,
+          payload.linkLabel ?? payload.tabTitle,
+        );
+        if (result.ok) {
+          this.requestFreshExtractionBurst();
+          await waitForFreshExtraction(this.stateManager, genBefore, 8000);
+          const scopeChanged = await waitForHistoryScopeChange(this.stateManager, scopeBefore, 5000);
+          if (!scopeChanged) {
+            this.requestFreshExtractionBurst();
+            await waitForFreshExtraction(this.stateManager, this.stateManager.generation, 3000);
+          }
+        }
         socket.emit('command:result', result);
       });
 

@@ -4,6 +4,7 @@ import { clickSheetAction } from '../../../actions/sheetActions.js';
 import { QUEUE_ACTION_LABELS } from '../../../constants/queueActions.js';
 import { useCommandClient } from '../../../state/commandClient.js';
 import { useUiState } from '../../../state/uiState.js';
+import { QueueActionIcon } from './QueueActionIcon.js';
 
 export interface QueueActionsSheetProps {
   visible: boolean;
@@ -44,7 +45,7 @@ export function QueueActionsSheet({ visible }: QueueActionsSheetProps) {
           ui.showToast(`${label}...`, 'success');
         }}
       >
-        <span className="sheet-item-icon">{action.type === 'send' ? '^' : action.type === 'remove' ? 'x' : '*'}</span>
+        <span className="sheet-item-icon"><QueueActionIcon type={action.type} /></span>
         <span>{label}</span>
       </button>
     );

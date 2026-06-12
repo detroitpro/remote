@@ -379,7 +379,7 @@ export interface MessageAttachment {
 
 export interface CommandPayload {
   commandId: string;
-  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'close_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'stop_agent' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model' | 'load_history' | 'open_source_control' | 'kill_server';
+  type: 'send_message' | 'approve' | 'reject' | 'approve_all' | 'switch_tab' | 'close_tab' | 'new_chat' | 'set_mode' | 'set_model' | 'click_action' | 'stop_agent' | 'get_plan_full' | 'get_plan_model_options' | 'set_plan_model' | 'load_history' | 'open_source_control' | 'open_transcript_link' | 'kill_server';
   /** Scroll steps in Cursor IDE when loading older chat history (load_history). */
   times?: number;
   text?: string;
@@ -394,6 +394,10 @@ export interface CommandPayload {
   planModelId?: string;
   tabTitle?: string;
   tabSource?: 'open' | 'sidebar';
+  /** Raw href from assistant transcript link (internal only). */
+  linkHref?: string;
+  /** Visible anchor text for title-based fallback when opening by composerId fails. */
+  linkLabel?: string;
   windowId?: string;
 }
 

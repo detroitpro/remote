@@ -5,6 +5,7 @@ import type { GitSnapshotStoreDiagnostics } from '../shared/diagnostics.js';
 import { AGENT_ACTIVITY_STALE_MS, BACKGROUND_TASKS_STALE_MS } from './activity-stale.js';
 import { filterActionableApprovals } from './approval-filter.js';
 import { mergeMessages } from './message-history.js';
+import { getHistoryScopeKey } from '../shared/history-scope.js';
 
 export function findGitSnapshotForTitle(
   windowTitle: string,
@@ -105,6 +106,10 @@ export class StateManager extends EventEmitter {
     return this._generation;
   }
 
+  historyScopeKey(): string {
+    return getHistoryScopeKey(this.currentState);
+  }
+
   constructor(debounceMs: number) {
     super();
     this.debounceMs = debounceMs;
@@ -163,7 +168,7 @@ export class StateManager extends EventEmitter {
       newState.agentStatus = 'idle';
     }
 
-    const historyScope = this.getHistoryScope(newState);
+    const historyScope = getHistoryScopeKey(newState);
     const scopeChanged = historyScope !== this.historyScope;
     if (scopeChanged) {
       this.historyScope = historyScope;
@@ -182,20 +187,6 @@ export class StateManager extends EventEmitter {
 
     this.currentState = stateForApply;
     this.schedulePatch(patch);
-  }
-
-  private getHistoryScope(state: CursorState): string {
-    const activeTab =
-      state.chatTabs.find((t) => t.isActive && t.source === 'open') ??
-      state.chatTabs.find((t) => t.isActive);
-    const tabComposerId = activeTab?.composerId ?? '';
-    const tabTitle = (activeTab?.title ?? '').trim().replace(/\s+/g, ' ');
-    return [
-      state.activeWindowId,
-      state.activeComposerId,
-      tabComposerId,
-      tabTitle,
-    ].join('|');
   }
 
   onExtractionFailure(message: string | null): void {

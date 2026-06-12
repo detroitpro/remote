@@ -2435,10 +2435,18 @@ header {
 }
 
 .sheet-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 20px;
-  text-align: center;
+  height: 20px;
+  flex-shrink: 0;
   font-size: 14px;
-  opacity: 0.7;
+  opacity: 0.75;
+}
+
+.sheet-item-danger .sheet-item-icon {
+  opacity: 1;
 }
 
 .sheet-item-check {
