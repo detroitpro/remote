@@ -192,53 +192,11 @@ describe('web: agent status', () => {
     assert.match(text.textContent!, /Idle/i);
   });
 
-  it('keeps stop button visible and emits stop only when enabled', () => {
+  // Stop button behavior is covered by tests/header-bar.test.ts (isolated component).
+  it('integration smoke: App still renders stop control in header', () => {
     const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
     fireFullState(env.mockSocket, fixture[0].state!);
-    const idleStop = env.document.getElementById('btn-agent-stop') as HTMLButtonElement;
-    assert.ok(idleStop, 'Stop button should always be rendered');
-    assert.equal(idleStop.disabled, true);
-
-    fireFullState(env.mockSocket, {
-      ...fixture[1].state!,
-      agentStatus: 'idle',
-      agentActivityLive: false,
-      agentStopSelectorPath: '#stop-agent',
-      agentStopAvailable: true,
-      agentStopSource: 'composer',
-    });
-    const activeStop = env.document.getElementById('btn-agent-stop') as HTMLButtonElement;
-    assert.equal(activeStop.disabled, false);
-    act(() => activeStop.click());
-
-    const sent = env.mockSocket.emitted.find(item => item.event === 'command:stop_agent');
-    assert.ok(sent, 'Expected stop button to emit stop_agent');
-  });
-
-  it('does not enable stop for background tasks without stop selector', () => {
-    const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
-    fireFullState(env.mockSocket, {
-      ...fixture[0].state!,
-      backgroundTasks: [{ id: 'bg-1', label: 'npm run dev' }],
-      agentStopAvailable: false,
-      agentStopSource: 'none',
-    });
-
-    const stop = env.document.getElementById('btn-agent-stop') as HTMLButtonElement;
-    assert.equal(stop.disabled, true);
-  });
-
-  it('enables stop from background task stop selector even when agent status is idle', () => {
-    const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
-    fireFullState(env.mockSocket, {
-      ...fixture[0].state!,
-      backgroundTasks: [{ id: 'bg-1', label: 'npm run dev', stopSelectorPath: '#stop-bg' }],
-      agentStopAvailable: true,
-      agentStopSource: 'background_task',
-    });
-
-    const stop = env.document.getElementById('btn-agent-stop') as HTMLButtonElement;
-    assert.equal(stop.disabled, false);
+    assert.ok(env.document.getElementById('btn-agent-stop'), 'Stop button should exist in App shell');
   });
 });
 
@@ -521,6 +479,7 @@ describe('web: attachments', () => {
       agentStopSelectorPath: '',
       agentStopAvailable: false,
       agentStopSource: 'none',
+      exploratoryUi: null,
     };
   }
 
@@ -595,6 +554,7 @@ describe('web: background tasks', () => {
       agentStopSelectorPath: '',
       agentStopAvailable: false,
       agentStopSource: 'none',
+      exploratoryUi: null,
     };
   }
 
@@ -746,6 +706,7 @@ describe('web: git status', () => {
       agentStopSelectorPath: '',
       agentStopAvailable: false,
       agentStopSource: 'none',
+      exploratoryUi: null,
     };
   }
 
@@ -885,9 +846,9 @@ describe('web: debug panel', () => {
   });
 });
 
-// ─── Questionnaire widget rendering ───
+// ─── Questionnaire widget rendering (detailed cases: tests/questionnaire-bar.test.ts) ───
 
-describe('web: questionnaire widget', () => {
+describe('web: questionnaire widget integration', () => {
   let env: ReturnType<typeof createTestEnv>;
 
   beforeEach(() => {
@@ -923,126 +884,26 @@ describe('web: questionnaire widget', () => {
       agentStopSelectorPath: '',
       agentStopAvailable: false,
       agentStopSource: 'none',
+      exploratoryUi: null,
+      exploratoryUi: null,
     };
   }
 
-  it('hides questionnaire bar when questionnaire is null', () => {
-    fireFullState(env.mockSocket, baseState());
-    const bar = env.document.getElementById('questionnaire-bar')!;
-    assert.ok(bar.classList.contains('hidden'), 'Questionnaire bar should be hidden');
-  });
-
-  it('shows questionnaire bar with questions', () => {
+  it('integration smoke: App wires questionnaire bar when state has questions', () => {
     const state = baseState();
     state.questionnaire = {
-      questions: [
-        {
-          number: '1.', text: 'Pick a color?', isActive: true,
-          options: [
-            { letter: 'A', label: 'Red', isFreeform: false, isSelected: true, selectorPath: 'sp-red' },
-            { letter: 'B', label: 'Blue', isFreeform: false, isSelected: false, selectorPath: 'sp-blue' },
-          ],
-        },
-      ],
+      questions: [{
+        number: '1.', text: 'Q?', isActive: true,
+        options: [{ letter: 'A', label: 'Yes', isFreeform: false, isSelected: false, selectorPath: 'sp-a' }],
+      }],
       activeIndex: 0,
       totalLabel: '1 of 1',
       skipSelectorPath: 'sp-skip',
       continueSelectorPath: 'sp-continue',
-      continueDisabled: true,
-    };
-    fireFullState(env.mockSocket, state);
-    const bar = env.document.getElementById('questionnaire-bar')!;
-    assert.ok(!bar.classList.contains('hidden'), 'Questionnaire bar should be visible');
-    const stepper = env.document.getElementById('questionnaire-stepper')!;
-    assert.equal(stepper.textContent, '1 of 1');
-    const questions = bar.querySelectorAll('.questionnaire-question');
-    assert.equal(questions.length, 1);
-    const options = bar.querySelectorAll('.questionnaire-option');
-    assert.equal(options.length, 2);
-    assert.match(options[0].textContent!, /A.*Red/);
-    assert.match(options[1].textContent!, /B.*Blue/);
-    assert.ok(options[0].classList.contains('questionnaire-option-selected'));
-    assert.ok(!options[1].classList.contains('questionnaire-option-selected'));
-  });
-
-  it('disables continue button when continueDisabled is true', () => {
-    const state = baseState();
-    state.questionnaire = {
-      questions: [{ number: '1.', text: 'Q?', isActive: true, options: [] }],
-      activeIndex: 0, totalLabel: '1 of 1',
-      skipSelectorPath: 'sp-skip', continueSelectorPath: 'sp-continue',
-      continueDisabled: true,
-    };
-    fireFullState(env.mockSocket, state);
-    const btn = env.document.getElementById('btn-q-continue')! as HTMLButtonElement;
-    assert.ok(btn.disabled, 'Continue should be disabled');
-  });
-
-  it('hides questionnaire bar when questionnaire becomes null via patch', () => {
-    const state = baseState();
-    state.questionnaire = {
-      questions: [{ number: '1.', text: 'Q?', isActive: true, options: [] }],
-      activeIndex: 0, totalLabel: '1 of 1',
-      skipSelectorPath: '', continueSelectorPath: '',
       continueDisabled: false,
     };
     fireFullState(env.mockSocket, state);
     const bar = env.document.getElementById('questionnaire-bar')!;
-    assert.ok(!bar.classList.contains('hidden'), 'Should be visible initially');
-
-    firePatch(env.mockSocket, { questionnaire: null });
-    assert.ok(bar.classList.contains('hidden'), 'Should hide after patch with null');
-  });
-
-  it('marks active question with active class', () => {
-    const state = baseState();
-    state.questionnaire = {
-      questions: [
-        { number: '1.', text: 'Q1?', isActive: false, options: [] },
-        { number: '2.', text: 'Q2?', isActive: true, options: [] },
-      ],
-      activeIndex: 1, totalLabel: '1 of 2',
-      skipSelectorPath: '', continueSelectorPath: '',
-      continueDisabled: false,
-    };
-    fireFullState(env.mockSocket, state);
-    const questions = env.document.querySelectorAll('.questionnaire-question');
-    assert.equal(questions.length, 2);
-    assert.ok(!questions[0].classList.contains('questionnaire-question-active'));
-    assert.ok(questions[1].classList.contains('questionnaire-question-active'));
-  });
-
-  it('updates selected questionnaire option optimistically on click', () => {
-    const state = baseState();
-    state.questionnaire = {
-      questions: [
-        {
-          number: '1.',
-          text: 'Pick a color?',
-          isActive: true,
-          options: [
-            { letter: 'A', label: 'Red', isFreeform: false, isSelected: true, selectorPath: 'sp-red' },
-            { letter: 'B', label: 'Blue', isFreeform: false, isSelected: false, selectorPath: 'sp-blue' },
-          ],
-        },
-      ],
-      activeIndex: 0,
-      totalLabel: '1 of 1',
-      skipSelectorPath: 'sp-skip',
-      continueSelectorPath: 'sp-continue',
-      continueDisabled: true,
-    };
-    fireFullState(env.mockSocket, state);
-
-    const options = env.document.querySelectorAll('.questionnaire-option');
-    const optionB = options[1] as HTMLButtonElement;
-    act(() => optionB.click());
-
-    assert.ok(!options[0].classList.contains('questionnaire-option-selected'));
-    assert.ok(options[1].classList.contains('questionnaire-option-selected'));
-
-    const sent = env.mockSocket.emitted.findLast(item => item.event === 'command:click_action');
-    assert.ok(sent, 'Expected questionnaire option click_action');
-    assert.equal((sent.args[0] as { selectorPath?: string }).selectorPath, 'sp-blue');
+    assert.ok(!bar.classList.contains('hidden'));
   });
 });

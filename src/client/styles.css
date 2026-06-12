@@ -2581,8 +2581,44 @@ header {
   .btn-approve, .btn-reject { height: 44px; }
   .approval-bar,
   .questionnaire-bar,
+  .exploratory-chrome,
   #input-bar {
     padding-left: max(14px, calc((100% - 800px) / 2));
     padding-right: max(14px, calc((100% - 800px) / 2));
   }
+}
+
+/* --- Exploratory Cursor chrome (wave 3, probe-driven) --- */
+
+.exploratory-chrome {
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sticky-title-bar {
+  font-size: 13px;
+  color: rgba(228, 228, 228, 0.72);
+}
+
+.cloud-widget-strip,
+.subagent-tray-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cloud-widget-chip,
+.subagent-tray-item {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.subagent-tray-status {
+  margin-left: 6px;
+  opacity: 0.75;
 }

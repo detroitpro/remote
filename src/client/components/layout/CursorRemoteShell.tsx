@@ -2,8 +2,10 @@ import React from 'react';
 import type { CursorState } from '../../../server/types.js';
 import { useServerHealth } from '../../state/serverHealth.js';
 import type { BooleanStateSetter } from '../../types/ui.js';
+import { ExploratoryChrome } from '../exploratory/ExploratoryChrome.js';
+import { ApprovalBar } from '../decision/ApprovalBar.js';
 import { QuestionnaireBar } from '../decision/QuestionnaireBar.js';
-import { ApprovalBar, MessageViewport } from '../messages/transcript.js';
+import { MessageViewport } from '../messages/transcript.js';
 import { BottomSheetHost } from '../overlays/BottomSheetHost.js';
 import { PlanModal } from '../overlays/PlanModal.js';
 import { ToastHost } from '../overlays/ToastHost.js';
@@ -43,6 +45,7 @@ export function CursorRemoteShell({
       />
       <WindowPicker windows={state.windows || []} activeWindowId={state.activeWindowId} />
       <ChatTabBar tabs={state.chatTabs || []} />
+      <ExploratoryChrome chrome={state.exploratoryUi} />
       <MessageViewport state={state} socketConnected={socketConnected} />
       <ApprovalBar approvals={state.pendingApprovals || []} />
       <QuestionnaireBar state={state} />

@@ -2107,6 +2107,7 @@ export function extractionFunction(
       agentStopSelectorPath,
       agentStopAvailable,
       agentStopSource,
+      exploratoryUi: null,
       _rawSignals,
     };
   } catch {

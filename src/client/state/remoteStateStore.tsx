@@ -27,6 +27,7 @@ export const defaultCursorState: CursorState = {
   agentStopSelectorPath: '',
   agentStopAvailable: false,
   agentStopSource: 'none',
+  exploratoryUi: null,
 };
 
 export const RemoteStateContext = createContext<CursorState>(defaultCursorState);

@@ -30,6 +30,7 @@ function baseState(overrides: Partial<CursorState> = {}): CursorState {
     agentStopSelectorPath: '',
     agentStopAvailable: false,
     agentStopSource: 'none',
+    exploratoryUi: null,
     ...overrides,
   };
 }
@@ -62,6 +63,7 @@ describe('stop state view model', () => {
       backgroundTasks: [{ id: 'bg-1', label: 'npm run dev' }],
       agentStopAvailable: false,
       agentStopSource: 'none',
+    exploratoryUi: null,
     });
 
     const availability = getRealStopAvailability(state);
@@ -119,6 +121,7 @@ describe('stop state view model', () => {
       agentStopSelectorPath: '',
       agentStopAvailable: false,
       agentStopSource: 'none',
+    exploratoryUi: null,
     });
 
     const viewModel = buildStopButtonState({

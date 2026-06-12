@@ -86,6 +86,27 @@ export interface BackgroundTask {
   stopSelectorPath?: string;
 }
 
+/** Exploratory Cursor chrome not yet fully extracted — populated after CDP probe. */
+export interface CloudWidget {
+  id: string;
+  label: string;
+  detail?: string;
+  selectorPath?: string;
+}
+
+export interface SubagentTrayItem {
+  id: string;
+  label: string;
+  status?: string;
+  selectorPath?: string;
+}
+
+export interface ExploratoryUiChrome {
+  stickyTitle: string | null;
+  cloudWidgets: CloudWidget[];
+  subagentTrays: SubagentTrayItem[];
+}
+
 export interface CursorState {
   connected: boolean;
   /** Health of DOM extraction independent from the CDP websocket connection. */
@@ -129,6 +150,8 @@ export interface CursorState {
   agentStopAvailable: boolean;
   /** Provenance of the active stop control. */
   agentStopSource: 'composer' | 'background_task' | 'none';
+  /** Optional exploratory chrome (sticky title, cloud widgets, subagent trays). */
+  exploratoryUi: ExploratoryUiChrome | null;
   _rawSignals?: RawSignals;
 }
 

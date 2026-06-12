@@ -30,6 +30,7 @@ function baseState(overrides: Partial<CursorState> = {}): CursorState {
     agentStopSelectorPath: '',
     agentStopAvailable: false,
     agentStopSource: 'none',
+    exploratoryUi: null,
     ...overrides,
   };
 }

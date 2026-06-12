@@ -55,6 +55,7 @@ function emptyState(): CursorState {
     agentStopSelectorPath: '',
     agentStopAvailable: false,
     agentStopSource: 'none',
+    exploratoryUi: null,
   };
 }
 

@@ -238,6 +238,7 @@ describe('applyDerivedActivityToState', () => {
       agentStopSelectorPath: '',
       agentStopAvailable: false,
       agentStopSource: 'none',
+      exploratoryUi: null,
     };
     const result = applyDerivedActivityToState(state);
     assert.deepEqual(result, state);
