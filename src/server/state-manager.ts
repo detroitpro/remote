@@ -28,6 +28,22 @@ export function findGitSnapshotForTitle(
   return undefined;
 }
 
+export function resolveGitSnapshotForActiveWindow(
+  activeWindowTitle: string | undefined,
+  snapshots: Map<string, GitWindowSnapshot>,
+): GitWindowSnapshot | undefined {
+  if (activeWindowTitle) {
+    const matched = findGitSnapshotForTitle(activeWindowTitle, snapshots);
+    if (matched) return matched;
+  }
+
+  if (snapshots.size === 1) {
+    return snapshots.values().next().value;
+  }
+
+  return undefined;
+}
+
 function emptyState(): CursorState {
   return {
     connected: false,
@@ -391,9 +407,10 @@ export class StateManager extends EventEmitter {
     const activeWindow = this.currentState.windows.find(
       window => window.id === this.currentState.activeWindowId,
     );
-    const snapshot = activeWindow
-      ? findGitSnapshotForTitle(activeWindow.title, this.gitWindowSnapshots)
-      : undefined;
+    const snapshot = resolveGitSnapshotForActiveWindow(
+      activeWindow?.title,
+      this.gitWindowSnapshots,
+    );
     this.activeGitWindowKey = snapshot?.windowKey ?? null;
     const nextGitStatus = snapshot?.gitStatus ?? null;
     if (JSON.stringify(this.currentState.gitStatus) === JSON.stringify(nextGitStatus)) {
