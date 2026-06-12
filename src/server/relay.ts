@@ -562,7 +562,6 @@ export class Relay {
     this.io.on('connection', (socket) => {
       console.log(`[relay] Client connected: ${socket.id}`);
 
-      this.extensionBridge.reloadGitStatusFromDisk();
       this.stateManager.hydrateGitStatus();
       socket.emit('state:full', this.stateManager.getCurrentState());
 

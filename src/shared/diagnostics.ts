@@ -13,11 +13,6 @@ export interface ServerIdentity {
 
 export interface ExtensionBridgeDiagnostics {
   dataDirName: string;
-  gitStatusFileExists: boolean;
-  gitStatusFileMtime: number | null;
-  gitStatusRaw: string | null;
-  gitStatusParsed: GitStatusInfo | null;
-  gitBridgeDebug: GitBridgeDebugInfo | null;
 }
 
 export type GitSnapshotReason =

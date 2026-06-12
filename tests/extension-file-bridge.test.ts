@@ -6,7 +6,6 @@ import { join } from 'path';
 import { ExtensionFileBridge } from '../src/server/extension-file-bridge.js';
 import { StateManager } from '../src/server/state-manager.js';
 import {
-  gitStatusBridgePath,
   openSourceControlResultPath,
 } from '../src/shared/extension-bridge.js';
 
@@ -18,10 +17,6 @@ function makeTempDir(): string {
   return dir;
 }
 
-function nextTick(ms = 25): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 afterEach(() => {
   while (tempDirs.length) {
     rmSync(tempDirs.pop()!, { recursive: true, force: true });
@@ -29,71 +24,14 @@ afterEach(() => {
 });
 
 describe('extension file bridge', () => {
-  it('loads git status updates from the shared file', async () => {
-    const dataDir = makeTempDir();
-    const manager = new StateManager(0);
-    manager.updateWindows([{ id: 'w1', title: 'cursor-ide-remote', url: '' }], 'w1');
-    const bridge = new ExtensionFileBridge(dataDir, manager);
-    bridge.start();
-
-    writeFileSync(gitStatusBridgePath(dataDir), JSON.stringify({
-      available: true,
-      changedCount: 4,
-      repoLabel: 'cursor-ide-remote',
-      updatedAt: Date.now(),
-      source: 'vscode.git',
-      windowKey: 'cursor-ide-remote',
-    }) + '\n', 'utf-8');
-
-    await nextTick(75);
-    bridge.stop();
-
-    assert.equal(manager.getCurrentState().gitStatus?.available, true);
-    assert.equal(manager.getCurrentState().gitStatus?.changedCount, 4);
-    assert.equal(manager.getCurrentState().gitStatus?.repoLabel, 'cursor-ide-remote');
-    assert.equal(manager.getCurrentState().gitStatus?.source, 'vscode.git');
-    assert.equal(manager.getCurrentState().gitStatus?.windowKey, 'cursor-ide-remote');
-  });
-
-  it('reloadGitStatusFromDisk rehydrates git status after state was cleared', () => {
-    const dataDir = makeTempDir();
-    const manager = new StateManager(0);
-    manager.updateWindows([{ id: 'w1', title: 'cursor-ide-remote', url: '' }], 'w1');
-    const bridge = new ExtensionFileBridge(dataDir, manager);
-    bridge.start();
-
-    writeFileSync(gitStatusBridgePath(dataDir), JSON.stringify({
-      available: true,
-      changedCount: 4,
-      repoLabel: 'cursor-ide-remote',
-      updatedAt: Date.now(),
-      source: 'vscode.git',
-      windowKey: 'cursor-ide-remote',
-    }) + '\n', 'utf-8');
-
-    bridge.reloadGitStatusFromDisk();
-    assert.equal(manager.getCurrentState().gitStatus?.changedCount, 4);
-
-    manager.updateGitStatus(null);
-    assert.equal(manager.getCurrentState().gitStatus, null);
-
-    bridge.reloadGitStatusFromDisk();
-    assert.equal(manager.getCurrentState().gitStatus?.changedCount, 4);
-    bridge.stop();
-  });
-
-  it('reports bridge diagnostics for git status files', () => {
+  it('reports data dir diagnostics without git status files', () => {
     const dataDir = makeTempDir();
     const manager = new StateManager(0);
     const bridge = new ExtensionFileBridge(dataDir, manager);
-
-    writeFileSync(gitStatusBridgePath(dataDir), 'null\n', 'utf-8');
 
     const diagnostics = bridge.getDiagnostics();
-    assert.equal(diagnostics.gitStatusFileExists, true);
-    assert.equal(diagnostics.gitStatusRaw, 'null');
-    assert.equal(diagnostics.gitStatusParsed, null);
-    assert.ok(diagnostics.dataDirName.length > 0);
+    assert.equal(diagnostics.dataDirName.length > 0, true);
+    assert.deepEqual(Object.keys(diagnostics), ['dataDirName']);
   });
 
   it('waits for the extension ack when opening source control', async () => {

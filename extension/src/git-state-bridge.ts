@@ -10,15 +10,21 @@ import type {
   OpenSourceControlResult,
 } from '../../src/shared/extension-bridge.js';
 import {
-  gitBridgeDebugPath,
-  gitStatusBridgePath,
   openSourceControlRequestPath,
   openSourceControlResultPath,
 } from '../../src/shared/extension-bridge.js';
-import type { GitBridgeDebugInfo } from '../../src/shared/diagnostics.js';
+import type { GitSnapshotReason } from '../../src/shared/diagnostics.js';
 import { snapshotSignature, type GitWindowSnapshotResult } from '../../src/shared/git-snapshot.js';
 import { resolveWorkspaceIdentity } from '../../src/shared/workspace-identity.js';
 import type { GitLocalStatusSummary } from './git-status-display.js';
+import type { HealthData } from './status-bar.js';
+
+const GIT_PUSH_RETRY_ATTEMPTS = 3;
+const GIT_PUSH_RETRY_DELAY_MS = 500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 export class GitStateBridge implements vscode.Disposable {
   private readonly context: vscode.ExtensionContext;
@@ -28,10 +34,9 @@ export class GitStateBridge implements vscode.Disposable {
   private readonly onDidChangeLocalGitStatusEmitter = new vscode.EventEmitter<void>();
   private requestWatcher: FSWatcher | null = null;
   private lastRequestId = '';
-  private lastWrittenGitStatus = '';
   private lastPushedSignature = '';
+  private lastSeenServerInstanceId: string | null = null;
   private lastLocalSnapshot: GitWindowSnapshotResult | null = null;
-  private extensionVersion: string;
   private extensionInstanceId: string;
   private disposed = false;
 
@@ -45,7 +50,6 @@ export class GitStateBridge implements vscode.Disposable {
     this.context = context;
     this.outputChannel = outputChannel;
     this.serverManager = serverManager;
-    this.extensionVersion = context.extension.packageJSON?.version ?? 'unknown';
     this.extensionInstanceId = context.globalState.get<string>('gitBridgeInstanceId')
       ?? vscode.env.sessionId
       ?? `ext-${Date.now()}`;
@@ -72,9 +76,11 @@ export class GitStateBridge implements vscode.Disposable {
       void this.handleOpenSourceControlRequest();
     });
     this.serverManager.on('started', () => {
-      this.lastWrittenGitStatus = '';
       this.lastPushedSignature = '';
-      this.snapshotProvider.emitCurrentSnapshot('server-started');
+      this.lastSeenServerInstanceId = null;
+    });
+    this.serverManager.on('health', (health: HealthData) => {
+      void this.handleServerHealth(health);
     });
 
     void this.snapshotProvider.start();
@@ -119,6 +125,15 @@ export class GitStateBridge implements vscode.Disposable {
     this.onDidChangeLocalGitStatusEmitter.dispose();
   }
 
+  private handleServerHealth(health: HealthData): void {
+    const instanceId = health.server?.instanceId;
+    if (!instanceId || this.lastSeenServerInstanceId === instanceId) return;
+
+    this.lastSeenServerInstanceId = instanceId;
+    this.lastPushedSignature = '';
+    this.snapshotProvider.emitCurrentSnapshot('server-started');
+  }
+
   private resolveWindowKey(): string {
     const folder = vscode.workspace.workspaceFolders?.[0];
     const includeQualifier = vscode.workspace
@@ -146,30 +161,6 @@ export class GitStateBridge implements vscode.Disposable {
     this.lastLocalSnapshot = snapshot;
     this.onDidChangeLocalGitStatusEmitter.fire();
 
-    const windowName = vscode.workspace.name
-      ?? vscode.workspace.workspaceFolders?.[0]?.name
-      ?? 'unknown';
-    const providerDiagnostics = this.snapshotProvider.getDiagnostics();
-    const debugBase: GitBridgeDebugInfo = {
-      updatedAt: snapshot.updatedAt,
-      extensionVersion: this.extensionVersion,
-      windowName,
-      windowKey: snapshot.windowKey,
-      isOwner: this.serverManager.isOwner,
-      gitApiAvailable: providerDiagnostics.gitApiAvailable,
-      repoCount: providerDiagnostics.gitRepositoryCount,
-      repoResolved: providerDiagnostics.repoResolved,
-      repoLabel: snapshot.available ? snapshot.repoLabel : undefined,
-      changedCount: snapshot.changedCount,
-      repoBreakdown: snapshot.repoBreakdown,
-      gitProviderMode: 'vscode.git.state-cache',
-      gitRepositoryCount: providerDiagnostics.gitRepositoryCount,
-      gitLastSnapshotAt: providerDiagnostics.gitLastSnapshotAt ?? snapshot.updatedAt,
-      gitLastSnapshotReason: snapshot.reason,
-      gitExplicitRefreshCount: providerDiagnostics.gitExplicitRefreshCount,
-      lastError: providerDiagnostics.lastError,
-    };
-
     const gitStatus: GitStatusInfo = {
       available: snapshot.available,
       changedCount: snapshot.changedCount,
@@ -179,14 +170,19 @@ export class GitStateBridge implements vscode.Disposable {
       windowKey: snapshot.windowKey,
     };
 
-    await this.pushGitSnapshot(gitStatus, snapshot.windowKey, debugBase, snapshot.repoBreakdown);
+    await this.pushGitSnapshot(
+      gitStatus,
+      snapshot.windowKey,
+      snapshot.repoBreakdown,
+      snapshot.reason,
+    );
   }
 
   private async pushGitSnapshot(
     gitStatus: GitStatusInfo,
     windowKey: string,
-    debugBase: GitBridgeDebugInfo,
-    repoBreakdown?: GitBridgeDebugInfo['repoBreakdown'],
+    repoBreakdown: GitWindowSnapshotResult['repoBreakdown'],
+    reason: GitSnapshotReason,
   ): Promise<void> {
     const pushPayload: GitSnapshotPushPayload = {
       windowKey,
@@ -204,76 +200,57 @@ export class GitStateBridge implements vscode.Disposable {
       repoBreakdown: repoBreakdown ?? [],
       repoSnapshots: [],
       updatedAt: gitStatus.updatedAt,
-      reason: debugBase.gitLastSnapshotReason ?? 'initial',
+      reason,
     });
 
-    if (this.serverManager.isOwner) {
-      this.writeGitStatus(gitStatus);
+    const force = reason === 'server-started' || reason === 'explicit-refresh';
+    if (!force && signature === this.lastPushedSignature) {
+      return;
     }
 
-    let pushDebug: Partial<GitBridgeDebugInfo> = {};
-    if (signature !== this.lastPushedSignature) {
-      pushDebug = await this.postGitSnapshot(pushPayload);
-      if (pushDebug.lastPushOk) {
-        this.lastPushedSignature = signature;
-      }
-    } else {
-      pushDebug = { lastPushOk: true, lastPushAt: debugBase.updatedAt };
+    const pushResult = await this.postGitSnapshot(pushPayload);
+    if (pushResult.ok) {
+      this.lastPushedSignature = signature;
+      return;
     }
 
-    this.writeGitBridgeDebug({ ...debugBase, ...pushDebug });
+    this.outputChannel.warn(
+      `[git-bridge] Failed to push git snapshot (${reason}): ${pushResult.error ?? 'unknown error'}`,
+    );
   }
 
-  private async postGitSnapshot(payload: GitSnapshotPushPayload): Promise<Partial<GitBridgeDebugInfo>> {
+  private async postGitSnapshot(
+    payload: GitSnapshotPushPayload,
+  ): Promise<{ ok: boolean; error?: string }> {
     const pushUrl = this.serverManager.getGitSnapshotPushUrl();
-    try {
-      const resp = await fetch(pushUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(2500),
-      });
-      if (!resp.ok) {
+
+    for (let attempt = 1; attempt <= GIT_PUSH_RETRY_ATTEMPTS; attempt++) {
+      try {
+        const resp = await fetch(pushUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(2500),
+        });
+        if (resp.ok) {
+          return { ok: true };
+        }
         const text = await resp.text().catch(() => '');
-        return {
-          lastPushAt: Date.now(),
-          lastPushOk: false,
-          lastPushError: text || `HTTP ${resp.status}`,
-        };
+        const error = text || `HTTP ${resp.status}`;
+        if (attempt === GIT_PUSH_RETRY_ATTEMPTS) {
+          return { ok: false, error };
+        }
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        if (attempt === GIT_PUSH_RETRY_ATTEMPTS) {
+          return { ok: false, error };
+        }
       }
-      return {
-        lastPushAt: Date.now(),
-        lastPushOk: true,
-      };
-    } catch (err) {
-      return {
-        lastPushAt: Date.now(),
-        lastPushOk: false,
-        lastPushError: err instanceof Error ? err.message : String(err),
-      };
+
+      await sleep(GIT_PUSH_RETRY_DELAY_MS);
     }
-  }
 
-  private writeGitStatus(payload: GitStatusInfo | null): void {
-    const signature = payload
-      ? `${payload.windowKey}:${payload.available}:${payload.changedCount}:${payload.repoLabel}`
-      : 'null';
-    if (signature === this.lastWrittenGitStatus) return;
-
-    writeFileSync(
-      gitStatusBridgePath(this.context.globalStorageUri.fsPath),
-      JSON.stringify(payload) + '\n',
-      'utf-8',
-    );
-    this.lastWrittenGitStatus = signature;
-  }
-
-  private writeGitBridgeDebug(payload: GitBridgeDebugInfo): void {
-    writeFileSync(
-      gitBridgeDebugPath(this.context.globalStorageUri.fsPath),
-      JSON.stringify(payload) + '\n',
-      'utf-8',
-    );
+    return { ok: false, error: 'Push failed after retries' };
   }
 
   private async handleOpenSourceControlRequest(): Promise<void> {
@@ -311,7 +288,7 @@ export class GitStateBridge implements vscode.Disposable {
     writeFileSync(
       openSourceControlResultPath(this.context.globalStorageUri.fsPath),
       JSON.stringify(result) + '\n',
-      'utf-8'
+      'utf-8',
     );
   }
 }

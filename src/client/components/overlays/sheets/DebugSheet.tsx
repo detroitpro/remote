@@ -46,7 +46,6 @@ export function DebugSheet({
 
   const rows = useMemo(() => {
     const bridge = details?.extensionBridge as Record<string, unknown> | undefined;
-    const bridgeDebug = bridge?.gitBridgeDebug as Record<string, unknown> | undefined;
     const gitSnapshots = details?.gitSnapshots as Record<string, unknown> | undefined;
     const snapshotEntries = gitSnapshots?.windowSnapshots as Record<string, {
       changedCount: number;
@@ -59,9 +58,6 @@ export function DebugSheet({
         .join(', ')
       : '—';
     const server = (details?.server ?? serverHealth?.server) as Record<string, unknown> | undefined;
-    const repoBreakdown = Array.isArray(bridgeDebug?.repoBreakdown)
-      ? bridgeDebug.repoBreakdown.map((repo: { label: string; changedCount: number }) => `${repo.label}:${repo.changedCount}`).join(', ')
-      : '—';
     const clientStopState = buildStopButtonState({
       state,
       sendPending,
@@ -84,22 +80,7 @@ export function DebugSheet({
       ['Last git push', gitSnapshots?.lastPushAt ? new Date(Number(gitSnapshots.lastPushAt)).toLocaleString() : '—'],
       ['Last push window key', gitSnapshots?.lastPushWindowKey ?? '—'],
       ['State gitStatus', state.gitStatus ? `F:${state.gitStatus.changedCount}` : 'null'],
-      ['Bridge git file', bridge?.gitStatusFileExists ? 'yes' : 'no'],
-      ['Bridge git raw', bridge?.gitStatusRaw ?? '—'],
-      ['Git bridge window', bridgeDebug?.windowName ?? '—'],
-      ['Git bridge key', bridgeDebug?.windowKey ?? '—'],
-      ['Git bridge owner', bridgeDebug?.isOwner == null ? '—' : String(bridgeDebug.isOwner)],
-      ['Git bridge repos', bridgeDebug?.repoCount ?? '—'],
-      ['Git bridge resolved', bridgeDebug?.repoResolved == null ? '—' : String(bridgeDebug.repoResolved)],
-      ['Git repo breakdown', repoBreakdown],
-      ['Git bridge count', bridgeDebug?.changedCount ?? '—'],
-      ['Git provider mode', bridgeDebug?.gitProviderMode ?? '—'],
-      ['Git last snapshot', bridgeDebug?.gitLastSnapshotAt ? new Date(Number(bridgeDebug.gitLastSnapshotAt)).toLocaleString() : '—'],
-      ['Git snapshot reason', bridgeDebug?.gitLastSnapshotReason ?? '—'],
-      ['Git explicit refresh count', bridgeDebug?.gitExplicitRefreshCount ?? '—'],
-      ['Git push ok', bridgeDebug?.lastPushOk == null ? '—' : String(bridgeDebug.lastPushOk)],
-      ['Git push error', bridgeDebug?.lastPushError ?? '—'],
-      ['Git bridge error', bridgeDebug?.lastError ?? '—'],
+      ['Health gitStatus', serverHealth?.gitStatus ? `F:${serverHealth.gitStatus.changedCount}` : 'null'],
       ['Stop selector', (details?.agentStopSelectorPath as string | undefined) ?? state.agentStopSelectorPath ?? '—'],
       ['Stop available', (details?.agentStopAvailable as boolean | undefined) == null ? String(state.agentStopAvailable) : String(details?.agentStopAvailable)],
       ['Stop source', (details?.agentStopSource as string | undefined) ?? state.agentStopSource ?? '—'],
