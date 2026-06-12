@@ -1674,6 +1674,30 @@ export function extractionFunction(
       return 'idle';
     }
 
+    function isComposerUuid(value: string): boolean {
+      return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+    }
+
+    function reconcileOpenTabComposerIds(tabs: ChatTab[]): void {
+      const sidebarByTitle = new Map<string, string>();
+      for (const t of tabs) {
+        if (t.source !== 'sidebar' || !isComposerUuid(t.composerId)) continue;
+        const key = cleanTabTitle(t.title).toLowerCase();
+        if (key && !sidebarByTitle.has(key)) sidebarByTitle.set(key, t.composerId);
+      }
+      for (const t of tabs) {
+        if (t.source !== 'open' || isComposerUuid(t.composerId)) continue;
+        const cid = sidebarByTitle.get(cleanTabTitle(t.title).toLowerCase());
+        if (cid) t.composerId = cid;
+      }
+      if (containerComposerId) {
+        for (const t of tabs) {
+          if (t.source !== 'open' || !t.isActive || isComposerUuid(t.composerId)) continue;
+          t.composerId = containerComposerId;
+        }
+      }
+    }
+
     function syncOpenTabWorkStatus(tabs: ChatTab[]): void {
       const byTitle = new Map<string, ChatTab['workStatus']>();
       for (const t of tabs) {
@@ -1857,6 +1881,7 @@ export function extractionFunction(
         }
       }
 
+      reconcileOpenTabComposerIds(chatTabs);
       syncOpenTabWorkStatus(chatTabs);
     } catch { /* skip */ }
 

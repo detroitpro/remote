@@ -50,4 +50,40 @@ describe('buildChatTabGroups', () => {
     assert.equal(groups.listTabs.length, 1);
     assert.equal(groups.listTabs[0].title, 'Another Chat');
   });
+
+  it('filters list tab by title when open tab uses synthetic composerId', () => {
+    const groups = buildChatTabGroups([
+      tab({ source: 'open', composerId: 'open:Greeting conversation', title: 'Greeting conversation' }),
+      tab({
+        source: 'sidebar',
+        composerId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        title: 'Greeting conversation',
+      }),
+      tab({ source: 'sidebar', composerId: 'other-id', title: 'Other work' }),
+    ]);
+
+    assert.equal(groups.openTabs.length, 1);
+    assert.equal(groups.listTabs.length, 1);
+    assert.equal(groups.listTabs[0].title, 'Other work');
+  });
+
+  it('keeps New Agent in list when open tab shares another conversation title', () => {
+    const groups = buildChatTabGroups([
+      tab({ source: 'open', composerId: 'open:Greeting conversation', title: 'Greeting conversation' }),
+      tab({ source: 'sidebar', composerId: 'glass:New Agent', title: 'New Agent' }),
+      tab({
+        source: 'sidebar',
+        composerId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        title: 'Greeting conversation',
+      }),
+      tab({ source: 'sidebar', composerId: 'other-id', title: 'Other work' }),
+    ]);
+
+    assert.equal(groups.openTabs.length, 1);
+    assert.equal(groups.listTabs.length, 2);
+    assert.deepEqual(
+      groups.listTabs.map(t => t.title),
+      ['New Agent', 'Other work'],
+    );
+  });
 });
