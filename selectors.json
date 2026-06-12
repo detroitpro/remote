@@ -65,7 +65,8 @@
     "strategies": [
       "[data-command-id='composer.createNewComposerTab']",
       "a.codicon-add-two",
-      "[aria-label*='New Chat']"
+      "[aria-label*='New Chat']",
+      "#workbench\\.parts\\.unifiedsidebar > div > div > div > div > div > div.agent-sidebar-header > div.agent-sidebar-header-actions > div:nth-child(1)"
     ]
   },
   "modeDropdown": {

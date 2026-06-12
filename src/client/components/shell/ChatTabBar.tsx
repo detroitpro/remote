@@ -44,11 +44,37 @@ export function ChatTabBar({ tabs }: ChatTabBarProps) {
     </div>
   );
 
-  if (visibleTabCount <= 1) {
+  if (visibleTabCount === 0) {
     return (
-      <nav id="tab-bar" className="tab-bar hidden">
+      <nav id="tab-bar" className="tab-bar">
         <div id="tab-list" className="tab-list" />
-        <button id="btn-new-chat" className="tab-new-btn" aria-label="New Chat">+</button>
+        <button
+          id="btn-new-chat"
+          className="tab-new-btn"
+          aria-label="New Chat"
+          onClick={() => command.emit('command:new_chat')}
+        >
+          +
+        </button>
+      </nav>
+    );
+  }
+
+  if (visibleTabCount === 1) {
+    const singleTab = openTabs[0] ?? sidebarTabs[0];
+    return (
+      <nav id="tab-bar" className="tab-bar">
+        <div id="tab-list" className="tab-list">
+          {renderTab(singleTab)}
+        </div>
+        <button
+          id="btn-new-chat"
+          className="tab-new-btn"
+          aria-label="New Chat"
+          onClick={() => command.emit('command:new_chat')}
+        >
+          +
+        </button>
       </nav>
     );
   }

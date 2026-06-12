@@ -28,13 +28,33 @@ describe('ChatTabBar component', () => {
 
   afterEach(() => env.cleanup());
 
-  it('hides tab bar when only one visible tab exists', () => {
+  it('shows the + button when there are no visible tabs and opens a new chat', () => {
+    env.render(React.createElement(ChatTabBar, { tabs: [] }));
+
+    const bar = env.document.getElementById('tab-bar')!;
+    assert.ok(!bar.classList.contains('hidden'));
+
+    const newChatButton = env.document.getElementById('btn-new-chat') as HTMLButtonElement | null;
+    assert.ok(newChatButton);
+    act(() => newChatButton!.click());
+
+    const sent = env.command.emitted.find(item => item.event === 'command:new_chat');
+    assert.ok(sent);
+  });
+
+  it('keeps the tab bar visible when only one visible tab exists', () => {
     env.render(React.createElement(ChatTabBar, {
       tabs: [tab({ source: 'open', title: 'Only chat' })],
     }));
 
     const bar = env.document.getElementById('tab-bar')!;
-    assert.ok(bar.classList.contains('hidden'));
+    assert.ok(!bar.classList.contains('hidden'));
+
+    const titles = Array.from(bar.querySelectorAll('.tab-title')).map(el => el.textContent);
+    assert.deepEqual(titles, ['Only chat']);
+
+    const newChatButton = env.document.getElementById('btn-new-chat') as HTMLButtonElement | null;
+    assert.ok(newChatButton);
   });
 
   it('renders Open and List groups without duplicate sidebar tabs', () => {
