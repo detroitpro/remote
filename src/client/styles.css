@@ -2791,8 +2791,13 @@ header {
 }
 
 .git-file-status {
-  font-size: 10px;
-  opacity: 0.6;
+  flex: 0 0 auto;
+  min-width: 1.1em;
+  font-family: var(--font-editor, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.75;
+  text-align: center;
 }
 
 .git-file-row-actions {

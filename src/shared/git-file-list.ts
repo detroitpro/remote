@@ -47,31 +47,31 @@ function uriToRelativePath(uri: string, rootUri: string): string {
 
 function statusLabel(status: number | undefined, bucket: GitFileBucket): string {
   if (status === undefined) {
-    if (bucket === 'untracked') return 'UNTRACKED';
-    if (bucket === 'conflicts') return 'CONFLICT';
-    if (bucket === 'staged') return 'INDEX_MODIFIED';
-    return 'MODIFIED';
+    if (bucket === 'untracked') return 'U';
+    if (bucket === 'conflicts') return 'U';
+    if (bucket === 'staged') return 'M';
+    return 'M';
   }
   const map: Record<number, string> = {
-    0: 'INDEX_MODIFIED',
-    1: 'INDEX_ADDED',
-    2: 'INDEX_DELETED',
-    3: 'INDEX_RENAMED',
-    4: 'INDEX_COPIED',
-    5: 'MODIFIED',
-    6: 'DELETED',
-    7: 'UNTRACKED',
-    8: 'IGNORED',
-    9: 'INTENT_TO_ADD',
-    10: 'ADDED_BY_US',
-    11: 'ADDED_BY_THEM',
-    12: 'DELETED_BY_US',
-    13: 'DELETED_BY_THEM',
-    14: 'BOTH_ADDED',
-    15: 'BOTH_DELETED',
-    16: 'BOTH_MODIFIED',
+    0: 'M', // INDEX_MODIFIED
+    1: 'A', // INDEX_ADDED
+    2: 'D', // INDEX_DELETED
+    3: 'R', // INDEX_RENAMED
+    4: 'C', // INDEX_COPIED
+    5: 'M', // MODIFIED
+    6: 'D', // DELETED
+    7: 'U', // UNTRACKED
+    8: 'I', // IGNORED
+    9: 'A', // INTENT_TO_ADD
+    10: 'U', // ADDED_BY_US (unmerged)
+    11: 'U', // ADDED_BY_THEM
+    12: 'U', // DELETED_BY_US
+    13: 'U', // DELETED_BY_THEM
+    14: 'U', // BOTH_ADDED
+    15: 'U', // BOTH_DELETED
+    16: 'U', // BOTH_MODIFIED
   };
-  return map[status] ?? `STATUS_${status}`;
+  return map[status] ?? '?';
 }
 
 function isBinaryPath(path: string): boolean {

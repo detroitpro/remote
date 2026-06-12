@@ -5,11 +5,13 @@ import { buildNewFileUnifiedDiff } from '../../src/shared/git-diff-parser.js';
 import { repoIdFromRootUri } from '../../src/shared/git-repo-id.js';
 import { resolveRepositories, type GitRepoLike } from '../../src/shared/git-snapshot.js';
 import type { GitSnapshotProvider } from './git-snapshot-provider.js';
+import type { UnifiedOutputChannel } from './output-channel.js';
 
 interface GitRepository {
   rootUri: vscode.Uri;
-  add?(paths: string[]): Promise<void>;
-  restore?(paths: string[], options?: { staged?: boolean }): Promise<void>;
+  add?(resources: string[] | vscode.Uri[], opts?: { update?: boolean }): Promise<void>;
+  restore?(resources: string[] | vscode.Uri[], options?: { staged?: boolean }): Promise<void>;
+  revert?(resources: vscode.Uri[]): Promise<void>;
   diffWithHEAD?(path: string): Promise<string>;
   diffIndexWithHEAD?(path: string): Promise<string>;
   state: {
@@ -28,6 +30,7 @@ export class GitActionExecutor {
   constructor(
     private readonly snapshotProvider: GitSnapshotProvider,
     private readonly resolveWorkspaceFolderPath: () => string | null,
+    private readonly outputChannel: UnifiedOutputChannel,
   ) {}
 
   async execute(request: GitActionRequest): Promise<GitActionResult> {
@@ -52,9 +55,11 @@ export class GitActionExecutor {
           return { ...base, error: `Unknown action: ${String((request as GitActionRequest).action)}` };
       }
     } catch (err) {
+      const debug = this.describeError(err);
       return {
         ...base,
-        error: err instanceof Error ? err.message : String(err),
+        error: this.errorSummary(err),
+        debug,
       };
     }
   }
@@ -82,7 +87,186 @@ export class GitActionExecutor {
   }
 
   private normalizeRepoPath(path: string): string {
-    return path.replace(/\\/g, '/');
+    return String(path).replace(/\\/g, '/');
+  }
+
+  private relativePathFromRepoUri(repo: GitRepository, uri: vscode.Uri): string {
+    const root = repo.rootUri.fsPath.replace(/\\/g, '/').replace(/\/+$/, '');
+    const file = uri.fsPath.replace(/\\/g, '/');
+    if (file.length >= root.length + 2 && file.slice(0, root.length).toLowerCase() === root.toLowerCase() && file[root.length] === '/') {
+      return file.slice(root.length + 1);
+    }
+    return this.normalizeRepoPath(vscode.workspace.asRelativePath(uri, false));
+  }
+
+  private resolveResourceUri(repo: GitRepository, relativePath: string): vscode.Uri {
+    const target = this.normalizeRepoPath(relativePath);
+    const collections = [
+      repo.state.indexChanges,
+      repo.state.workingTreeChanges,
+      repo.state.untrackedChanges ?? [],
+      repo.state.mergeChanges,
+    ];
+    for (const changes of collections) {
+      for (const change of changes) {
+        const uri = change.uri;
+        if (!uri) continue;
+        if (this.relativePathFromRepoUri(repo, uri) === target) {
+          return uri;
+        }
+      }
+    }
+    return this.pathToUri(repo, target);
+  }
+
+  private isPathTypeError(err: unknown): boolean {
+    const msg = err instanceof Error ? err.message : String(err);
+    return msg.includes('replace is not a function')
+      || msg.includes('.fsPath')
+      || msg.includes('sanitizeRelativePath');
+  }
+
+  private errorSummary(err: unknown): string {
+    if (err instanceof Error && err.message) return err.message;
+    return String(err);
+  }
+
+  private describeError(err: unknown): string[] {
+    const lines: string[] = [];
+    if (err instanceof Error) {
+      lines.push(`name=${err.name}`);
+      if (err.message) lines.push(`message=${err.message}`);
+      const withFields = err as Error & {
+        code?: string;
+        debug?: string[];
+        gitErrorCode?: string;
+        stderr?: string;
+        stdout?: string;
+        stack?: string;
+      };
+      if (Array.isArray(withFields.debug)) {
+        lines.push(...withFields.debug);
+      }
+      if (withFields.code) lines.push(`code=${withFields.code}`);
+      if (withFields.gitErrorCode) lines.push(`gitErrorCode=${withFields.gitErrorCode}`);
+      if (typeof withFields.stderr === 'string' && withFields.stderr.trim()) {
+        lines.push(`stderr=${withFields.stderr.trim()}`);
+      }
+      if (typeof withFields.stdout === 'string' && withFields.stdout.trim()) {
+        lines.push(`stdout=${withFields.stdout.trim()}`);
+      }
+      if (withFields.stack) {
+        const stackLines = withFields.stack.split('\n').map(line => line.trim()).filter(Boolean).slice(0, 6);
+        lines.push(...stackLines.map(line => `stack=${line}`));
+      }
+      return lines;
+    }
+
+    if (typeof err === 'object' && err !== null) {
+      for (const [key, value] of Object.entries(err)) {
+        lines.push(`${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`);
+      }
+      if (lines.length > 0) return lines;
+    }
+
+    return [`raw=${String(err)}`];
+  }
+
+  private makeDebugError(summary: string, debug: string[]): Error & { debug: string[] } {
+    const error = new Error(summary) as Error & { debug: string[] };
+    error.debug = debug;
+    return error;
+  }
+
+  private logAttempt(requestId: string, message: string): void {
+    this.outputChannel.info(`[git-action:${requestId}] ${message}`);
+  }
+
+  private async addResources(repo: GitRepository, relativePaths: string[]): Promise<void> {
+    if (!repo.add) {
+      throw new Error('Git add API unavailable');
+    }
+    const paths = relativePaths.map(path => this.normalizeRepoPath(path));
+    const uris = paths.map(path => this.resolveResourceUri(repo, path));
+
+    try {
+      this.logAttempt('stage', `repo.add(paths) paths=${JSON.stringify(paths)}`);
+      await repo.add(paths);
+      return;
+    } catch (err) {
+      const firstDebug = this.describeError(err);
+      this.outputChannel.warn(`[git-action:stage] repo.add(paths) failed: ${firstDebug.join(' | ')}`);
+      if (!this.isPathTypeError(err)) {
+        throw this.makeDebugError(this.errorSummary(err), [
+          'attempt=repo.add(paths)',
+          ...firstDebug,
+        ]);
+      }
+
+      try {
+        this.logAttempt('stage', `repo.add(uris) uris=${JSON.stringify(uris.map(uri => uri.toString()))}`);
+        await repo.add(uris);
+        return;
+      } catch (fallbackErr) {
+        const fallbackDebug = this.describeError(fallbackErr);
+        this.outputChannel.warn(
+          `[git-action:stage] repo.add(uris) failed: ${fallbackDebug.join(' | ')}`,
+        );
+        throw this.makeDebugError(this.errorSummary(fallbackErr), [
+          'attempt=repo.add(paths)',
+          ...firstDebug,
+          'attempt=repo.add(uris)',
+          ...fallbackDebug,
+        ]);
+      }
+    }
+  }
+
+  private async unstageResources(repo: GitRepository, relativePaths: string[]): Promise<void> {
+    const paths = relativePaths.map(path => this.normalizeRepoPath(path));
+    const uris = paths.map(path => this.resolveResourceUri(repo, path));
+
+    if (repo.restore) {
+      try {
+        this.logAttempt('unstage', `repo.restore(paths) paths=${JSON.stringify(paths)}`);
+        await repo.restore(paths, { staged: true });
+        return;
+      } catch (err) {
+        const firstDebug = this.describeError(err);
+        this.outputChannel.warn(`[git-action:unstage] repo.restore(paths) failed: ${firstDebug.join(' | ')}`);
+        if (!this.isPathTypeError(err)) {
+          throw this.makeDebugError(this.errorSummary(err), [
+            'attempt=repo.restore(paths)',
+            ...firstDebug,
+          ]);
+        }
+
+        try {
+          this.logAttempt('unstage', `repo.restore(uris) uris=${JSON.stringify(uris.map(uri => uri.toString()))}`);
+          await repo.restore(uris, { staged: true });
+          return;
+        } catch (fallbackErr) {
+          const fallbackDebug = this.describeError(fallbackErr);
+          this.outputChannel.warn(
+            `[git-action:unstage] repo.restore(uris) failed: ${fallbackDebug.join(' | ')}`,
+          );
+          throw this.makeDebugError(this.errorSummary(fallbackErr), [
+            'attempt=repo.restore(paths)',
+            ...firstDebug,
+            'attempt=repo.restore(uris)',
+            ...fallbackDebug,
+          ]);
+        }
+      }
+    }
+
+    if (repo.revert) {
+      this.logAttempt('unstage', `repo.revert(uris) uris=${JSON.stringify(uris.map(uri => uri.toString()))}`);
+      await repo.revert(uris);
+      return;
+    }
+
+    throw new Error('Git unstage API unavailable');
   }
 
   private pathToUri(repo: GitRepository, relativePath: string): vscode.Uri {
@@ -194,17 +378,15 @@ export class GitActionExecutor {
     }
 
     const paths = request.paths.map(path => this.normalizeRepoPath(String(path)));
+    this.logAttempt(
+      request.requestId,
+      `${stage ? 'stage' : 'unstage'} repo=${request.repoId} root=${repo.rootUri.fsPath} paths=${JSON.stringify(paths)}`,
+    );
 
     if (stage) {
-      if (!repo.add) {
-        return { ...base, error: 'Git add API unavailable' };
-      }
-      await repo.add(paths);
+      await this.addResources(repo, paths);
     } else {
-      if (!repo.restore) {
-        return { ...base, error: 'Git restore API unavailable' };
-      }
-      await repo.restore(paths, { staged: true });
+      await this.unstageResources(repo, paths);
     }
 
     return {

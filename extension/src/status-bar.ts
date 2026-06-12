@@ -18,6 +18,7 @@ export interface HealthData {
   generation: number;
   gitStatus?: { available: boolean; changedCount: number } | null;
   server?: ServerIdentity;
+  extensionBridge?: { dataDirName: string; dataDirPath: string };
 }
 
 export type ServerState = 'running' | 'disconnected' | 'stopped' | 'error';

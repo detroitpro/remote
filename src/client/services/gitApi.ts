@@ -57,22 +57,45 @@ export async function fetchGitDiff(
   return gitFetch(`/api/git/files/${encodeURIComponent(fileId)}/diff${query ? `?${query}` : ''}`);
 }
 
+async function gitMutation<T extends { ok: boolean; error?: string }>(
+  path: string,
+  init: RequestInit,
+): Promise<T> {
+  const token = getAuthToken();
+  const resp = await fetch(path, {
+    credentials: 'same-origin',
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers ?? {}),
+    },
+  });
+  const body = await resp.json().catch(() => ({
+    ok: false,
+    error: resp.statusText || `HTTP ${resp.status}`,
+  })) as T;
+  if (resp.ok) return body;
+  if (typeof body === 'object' && body !== null && 'ok' in body) return body;
+  throw new Error(body.error || `HTTP ${resp.status}`);
+}
+
 export async function stageGitFiles(fileIds: string[], requestId: string): Promise<{ ok: boolean; error?: string }> {
-  return gitFetch('/api/git/stage', {
+  return gitMutation('/api/git/stage', {
     method: 'POST',
     body: JSON.stringify({ fileIds, requestId }),
   });
 }
 
 export async function unstageGitFiles(fileIds: string[], requestId: string): Promise<{ ok: boolean; error?: string }> {
-  return gitFetch('/api/git/unstage', {
+  return gitMutation('/api/git/unstage', {
     method: 'POST',
     body: JSON.stringify({ fileIds, requestId }),
   });
 }
 
 export async function refreshGitSnapshot(requestId: string): Promise<{ ok: boolean; error?: string }> {
-  return gitFetch('/api/git/refresh', {
+  return gitMutation('/api/git/refresh', {
     method: 'POST',
     body: JSON.stringify({ requestId }),
   });

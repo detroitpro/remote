@@ -38,6 +38,7 @@ export class GitStateBridge implements vscode.Disposable {
   private readonly gitActionExecutor: GitActionExecutor;
   private readonly onDidChangeLocalGitStatusEmitter = new vscode.EventEmitter<void>();
   private requestWatcher: FSWatcher | null = null;
+  private bridgeDataDir: string;
   private lastRequestId = '';
   private lastGitActionRequestId = '';
   private lastPushedSignature = '';
@@ -58,6 +59,7 @@ export class GitStateBridge implements vscode.Disposable {
     this.context = context;
     this.outputChannel = outputChannel;
     this.serverManager = serverManager;
+    this.bridgeDataDir = context.globalStorageUri.fsPath;
     this.extensionInstanceId = context.globalState.get<string>('gitBridgeInstanceId')
       ?? vscode.env.sessionId
       ?? `ext-${Date.now()}`;
@@ -71,14 +73,12 @@ export class GitStateBridge implements vscode.Disposable {
     this.gitActionExecutor = new GitActionExecutor(
       this.snapshotProvider,
       () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null,
+      outputChannel,
     );
   }
 
   start(): void {
-    const dataDir = this.context.globalStorageUri.fsPath;
-    if (!existsSync(dataDir)) {
-      mkdirSync(dataDir, { recursive: true });
-    }
+    this.ensureBridgeDataDir(this.bridgeDataDir);
 
     this.snapshotProvider.onDidChangeSnapshot(snapshot => {
       void this.pushFromSnapshot(snapshot);
@@ -99,9 +99,31 @@ export class GitStateBridge implements vscode.Disposable {
     void this.snapshotProvider.start();
     void this.handleOpenSourceControlRequest();
     void this.handleGitActionRequest();
+    this.setupBridgeWatcher();
+  }
+
+  private ensureBridgeDataDir(dir: string): void {
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+  }
+
+  private updateBridgeDataDir(nextDir: string | undefined): void {
+    if (!nextDir || nextDir === this.bridgeDataDir) return;
+    this.bridgeDataDir = nextDir;
+    this.ensureBridgeDataDir(this.bridgeDataDir);
+    this.setupBridgeWatcher();
+    this.outputChannel.info(`[git-bridge] Bridge data dir: ${this.bridgeDataDir}`);
+  }
+
+  private setupBridgeWatcher(): void {
+    if (this.requestWatcher) {
+      this.requestWatcher.close();
+      this.requestWatcher = null;
+    }
 
     try {
-      this.requestWatcher = watch(dataDir, (_eventType, filename) => {
+      this.requestWatcher = watch(this.bridgeDataDir, (_eventType, filename) => {
         if (filename === 'open-source-control-request.json') {
           void this.handleOpenSourceControlRequest();
         }
@@ -110,7 +132,9 @@ export class GitStateBridge implements vscode.Disposable {
         }
       });
     } catch (err) {
-      this.outputChannel.warn(`[git-bridge] Failed to watch ${dataDir}: ${err instanceof Error ? err.message : String(err)}`);
+      this.outputChannel.warn(
+        `[git-bridge] Failed to watch ${this.bridgeDataDir}: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -144,6 +168,10 @@ export class GitStateBridge implements vscode.Disposable {
   }
 
   private handleServerHealth(health: HealthData): void {
+    this.updateBridgeDataDir(health.extensionBridge?.dataDirPath);
+    void this.handleOpenSourceControlRequest();
+    void this.handleGitActionRequest();
+
     const instanceId = health.server?.instanceId;
     if (instanceId && this.lastSeenServerInstanceId !== instanceId) {
       this.lastSeenServerInstanceId = instanceId;
@@ -290,7 +318,7 @@ export class GitStateBridge implements vscode.Disposable {
 
   private async handleOpenSourceControlRequest(): Promise<void> {
     if (this.disposed) return;
-    const path = openSourceControlRequestPath(this.context.globalStorageUri.fsPath);
+    const path = openSourceControlRequestPath(this.bridgeDataDir);
     if (!existsSync(path)) return;
 
     let request: OpenSourceControlRequest;
@@ -321,7 +349,7 @@ export class GitStateBridge implements vscode.Disposable {
     }
 
     writeFileSync(
-      openSourceControlResultPath(this.context.globalStorageUri.fsPath),
+      openSourceControlResultPath(this.bridgeDataDir),
       JSON.stringify(result) + '\n',
       'utf-8',
     );
@@ -329,7 +357,7 @@ export class GitStateBridge implements vscode.Disposable {
 
   private async handleGitActionRequest(): Promise<void> {
     if (this.disposed) return;
-    const path = gitActionRequestPath(this.context.globalStorageUri.fsPath);
+    const path = gitActionRequestPath(this.bridgeDataDir);
     if (!existsSync(path)) return;
 
     let request: GitActionRequest;
@@ -341,13 +369,19 @@ export class GitStateBridge implements vscode.Disposable {
 
     if (!request.requestId || request.requestId === this.lastGitActionRequestId) return;
     this.lastGitActionRequestId = request.requestId;
+    this.outputChannel.info(
+      `[git-bridge] request ${request.requestId}: ${request.action} repo=${request.repoId ?? '-'} paths=${JSON.stringify(request.paths ?? [])}`,
+    );
 
     const result = await this.gitActionExecutor.execute(request);
+    this.outputChannel.info(
+      `[git-bridge] result ${request.requestId}: ok=${result.ok} error=${result.error ?? '-'} debug=${JSON.stringify(result.debug ?? [])}`,
+    );
     if (result.ok && (request.action === 'stage' || request.action === 'unstage')) {
       this.snapshotProvider.emitCurrentSnapshot('state-change');
     }
     writeFileSync(
-      gitActionResultPath(this.context.globalStorageUri.fsPath),
+      gitActionResultPath(this.bridgeDataDir),
       JSON.stringify(result) + '\n',
       'utf-8',
     );

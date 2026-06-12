@@ -37,6 +37,7 @@ export class ExtensionFileBridge {
   getDiagnostics(): ExtensionBridgeDiagnostics {
     return {
       dataDirName: basename(this.dataDir),
+      dataDirPath: this.dataDir,
     };
   }
 

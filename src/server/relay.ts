@@ -429,6 +429,7 @@ export class Relay {
         gitStatus: diagnostics.gitStatus,
         generation: diagnostics.generation,
         server: diagnostics.server,
+        extensionBridge: diagnostics.extensionBridge,
       });
     });
 

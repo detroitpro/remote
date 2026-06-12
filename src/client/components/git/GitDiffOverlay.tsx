@@ -55,16 +55,20 @@ export function GitDiffOverlay({ file, snapshotId, onClose }: GitDiffOverlayProp
 
   const handleStageToggle = async () => {
     if (!canMutate) return;
-    const requestId = newCommandId();
-    const action = file.bucket === 'staged' ? unstageGitFiles : stageGitFiles;
-    const result = await action([file.fileId], requestId);
-    if (!result.ok) {
-      ui.showToast(result.error || 'Git action failed', 'error');
-      return;
+    try {
+      const requestId = newCommandId();
+      const action = file.bucket === 'staged' ? unstageGitFiles : stageGitFiles;
+      const result = await action([file.fileId], requestId);
+      if (!result.ok) {
+        ui.showToast(result.error || 'Git action failed', 'error');
+        return;
+      }
+      ui.showToast(file.bucket === 'staged' ? 'Unstaged' : 'Staged', 'success');
+      await refreshGitSnapshot(newCommandId()).catch(() => undefined);
+      onClose();
+    } catch (err) {
+      ui.showToast(err instanceof Error ? err.message : String(err), 'error');
     }
-    ui.showToast(file.bucket === 'staged' ? 'Unstaged' : 'Staged', 'success');
-    await refreshGitSnapshot(newCommandId()).catch(() => undefined);
-    onClose();
   };
 
   return (

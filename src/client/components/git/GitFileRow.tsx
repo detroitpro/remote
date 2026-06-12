@@ -30,12 +30,28 @@ export function GitFileRow({ file, onOpen, onStage, onUnstage }: GitFileRowProps
       </button>
       <div className="git-file-row-actions">
         {canStage && (
-          <button type="button" className="git-file-action" aria-label="Stage file" onClick={() => onStage(file)}>
+          <button
+            type="button"
+            className="git-file-action"
+            aria-label="Stage file"
+            onClick={(e) => {
+              e.stopPropagation();
+              void onStage(file);
+            }}
+          >
             Stage
           </button>
         )}
         {canUnstage && (
-          <button type="button" className="git-file-action" aria-label="Unstage file" onClick={() => onUnstage(file)}>
+          <button
+            type="button"
+            className="git-file-action"
+            aria-label="Unstage file"
+            onClick={(e) => {
+              e.stopPropagation();
+              void onUnstage(file);
+            }}
+          >
             Unstage
           </button>
         )}

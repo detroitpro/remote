@@ -120,6 +120,7 @@ export interface GitActionResult {
   ok: boolean;
   completedAt: number;
   error?: string;
+  debug?: string[];
   diffText?: string;
   isBinary?: boolean;
   affected?: string[];

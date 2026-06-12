@@ -31,7 +31,8 @@ describe('extension file bridge', () => {
 
     const diagnostics = bridge.getDiagnostics();
     assert.equal(diagnostics.dataDirName.length > 0, true);
-    assert.deepEqual(Object.keys(diagnostics), ['dataDirName']);
+    assert.equal(diagnostics.dataDirPath.length > 0, true);
+    assert.deepEqual(Object.keys(diagnostics), ['dataDirName', 'dataDirPath']);
   });
 
   it('waits for the extension ack when opening source control', async () => {

@@ -13,6 +13,7 @@ export interface ServerIdentity {
 
 export interface ExtensionBridgeDiagnostics {
   dataDirName: string;
+  dataDirPath: string;
 }
 
 export type GitSnapshotReason =

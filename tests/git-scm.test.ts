@@ -20,10 +20,10 @@ test('buildFileListFromRepo maps buckets from git state', () => {
   }, Date.now());
 
   assert.equal(files.length, 4);
-  assert.ok(files.some(file => file.bucket === 'staged' && file.path === 'staged.ts'));
-  assert.ok(files.some(file => file.bucket === 'changes' && file.path === 'changed.ts'));
-  assert.ok(files.some(file => file.bucket === 'untracked' && file.path === 'new.ts'));
-  assert.ok(files.some(file => file.bucket === 'conflicts' && file.path === 'conflict.ts'));
+  assert.ok(files.some(file => file.bucket === 'staged' && file.path === 'staged.ts' && file.status === 'M'));
+  assert.ok(files.some(file => file.bucket === 'changes' && file.path === 'changed.ts' && file.status === 'M'));
+  assert.ok(files.some(file => file.bucket === 'untracked' && file.path === 'new.ts' && file.status === 'U'));
+  assert.ok(files.some(file => file.bucket === 'conflicts' && file.path === 'conflict.ts' && file.status === 'U'));
 });
 
 test('buildGitScmSnapshot includes repos and files', () => {

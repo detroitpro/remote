@@ -102,25 +102,33 @@ export function GitReviewSheet({ state, visible }: GitReviewSheetProps) {
   };
 
   const handleStage = async (file: GitFileSummary) => {
-    const result = await stageGitFiles([file.fileId], newCommandId());
-    if (!result.ok) {
-      ui.showToast(result.error || 'Stage failed', 'error');
-      return;
+    try {
+      const result = await stageGitFiles([file.fileId], newCommandId());
+      if (!result.ok) {
+        ui.showToast(result.error || 'Stage failed', 'error');
+        return;
+      }
+      ui.showToast('Staged', 'success');
+      await refreshGitSnapshot(newCommandId()).catch(() => undefined);
+      await loadFiles();
+    } catch (err) {
+      ui.showToast(err instanceof Error ? err.message : String(err), 'error');
     }
-    ui.showToast('Staged', 'success');
-    await refreshGitSnapshot(newCommandId()).catch(() => undefined);
-    await loadFiles();
   };
 
   const handleUnstage = async (file: GitFileSummary) => {
-    const result = await unstageGitFiles([file.fileId], newCommandId());
-    if (!result.ok) {
-      ui.showToast(result.error || 'Unstage failed', 'error');
-      return;
+    try {
+      const result = await unstageGitFiles([file.fileId], newCommandId());
+      if (!result.ok) {
+        ui.showToast(result.error || 'Unstage failed', 'error');
+        return;
+      }
+      ui.showToast('Unstaged', 'success');
+      await refreshGitSnapshot(newCommandId()).catch(() => undefined);
+      await loadFiles();
+    } catch (err) {
+      ui.showToast(err instanceof Error ? err.message : String(err), 'error');
     }
-    ui.showToast('Unstaged', 'success');
-    await refreshGitSnapshot(newCommandId()).catch(() => undefined);
-    await loadFiles();
   };
 
   const openInCursor = async () => {
