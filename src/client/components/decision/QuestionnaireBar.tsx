@@ -1,16 +1,18 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CursorState } from '../../../server/types.js';
 import type { QuestionnaireOption } from '../../../server/types.js';
 import {
+  applyQuestionnaireOptionClick,
   clickQuestionnaireContinue,
   clickQuestionnaireOption,
   clickQuestionnaireSkip,
-  selectQuestionnaireOption,
 } from '../../actions/questionnaireActions.js';
 import { useCommandClient } from '../../state/commandClient.js';
 import { useUiState } from '../../state/uiState.js';
 import {
   buildQuestionnaireSelectionMap,
+  countSelectedInQuestion,
+  detectMultiSelectQuestions,
   type QuestionnaireSelectionMap,
 } from '../../view-models/questionnaire.js';
 import { QuestionnaireQuestion } from './QuestionnaireQuestion.js';
@@ -26,16 +28,34 @@ export function QuestionnaireBar({ state }: QuestionnaireBarProps) {
   const [optimisticSelections, setOptimisticSelections] = useState<QuestionnaireSelectionMap>(
     () => buildQuestionnaireSelectionMap(q),
   );
+  const selectionsRef = useRef(optimisticSelections);
+  const multiSelectQuestionsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    setOptimisticSelections(buildQuestionnaireSelectionMap(q));
+    const next = buildQuestionnaireSelectionMap(q);
+    for (const questionNumber of detectMultiSelectQuestions(q)) {
+      multiSelectQuestionsRef.current.add(questionNumber);
+    }
+    selectionsRef.current = next;
+    setOptimisticSelections(next);
   }, [q]);
 
   const handleSelectOption = useCallback((
+    questionNumber: string,
     questionOptions: QuestionnaireOption[],
     option: QuestionnaireOption,
   ) => {
-    setOptimisticSelections(current => selectQuestionnaireOption(current, questionOptions, option));
+    const current = selectionsRef.current;
+    const knownMultiSelect = multiSelectQuestionsRef.current.has(questionNumber);
+    const result = applyQuestionnaireOptionClick(current, questionOptions, option, knownMultiSelect);
+    if (!result.shouldClick) {
+      return;
+    }
+    if (countSelectedInQuestion(questionOptions, result.next) > 1) {
+      multiSelectQuestionsRef.current.add(questionNumber);
+    }
+    selectionsRef.current = result.next;
+    setOptimisticSelections(result.next);
     clickQuestionnaireOption(command, option.selectorPath);
     ui.showToast(`${option.letter} sent`, 'success');
   }, [command, ui]);

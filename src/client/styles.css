@@ -1593,11 +1593,27 @@ header {
 .questionnaire-option:hover { border-color: var(--accent-blue); }
 .questionnaire-option-selected {
   border-color: var(--accent-blue);
-  background: rgba(55, 148, 255, 0.15);
+  background: rgba(55, 148, 255, 0.22);
+  font-weight: 500;
+  box-shadow: 0 0 0 1px rgba(55, 148, 255, 0.25);
+}
+
+.questionnaire-options:has(.questionnaire-option-selected) .questionnaire-option:not(.questionnaire-option-selected) {
+  opacity: 0.5;
+  border-color: transparent;
+  background: transparent;
+}
+
+.questionnaire-options:has(.questionnaire-option-selected) .questionnaire-option:not(.questionnaire-option-selected) .questionnaire-option-letter {
+  color: var(--text-tertiary);
 }
 
 .questionnaire-option-letter {
   font-weight: 600;
+  color: var(--accent-blue);
+}
+
+.questionnaire-option-selected .questionnaire-option-letter {
   color: var(--accent-blue);
 }
 

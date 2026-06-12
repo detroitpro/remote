@@ -2068,14 +2068,12 @@ export function extractionFunction(
           const letter = (letterBtn?.textContent || '').trim();
           const isFreeform = optEl.classList.contains('composer-questionnaire-toolbar-option-freeform');
           const label = isFreeform ? 'Other' : (optEl.querySelector('.composer-questionnaire-toolbar-option-label')?.textContent || '').trim();
-          const cls = (optEl.getAttribute('class') || '').toLowerCase();
           const isSelected =
-            optEl.classList.contains('composer-questionnaire-toolbar-option-selected')
-            || cls.includes('selected')
+            !!letterBtn?.classList.contains('composer-questionnaire-toolbar-option-letter-selected')
+            || !!optEl.querySelector('.composer-questionnaire-toolbar-option-label-selected')
+            || optEl.classList.contains('composer-questionnaire-toolbar-option-selected')
             || optEl.getAttribute('aria-pressed') === 'true'
-            || optEl.getAttribute('aria-selected') === 'true'
-            || optEl.getAttribute('data-active') === 'true'
-            || optEl.getAttribute('data-state') === 'active';
+            || optEl.getAttribute('aria-selected') === 'true';
           const clickTarget = letterBtn || optEl;
           options.push({ letter, label, isFreeform, isSelected, selectorPath: buildSelectorPath(clickTarget as Element) });
         }

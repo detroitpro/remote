@@ -24,3 +24,22 @@ export function isQuestionnaireOptionSelected(
   if (typeof optimisticValue === 'boolean') return optimisticValue;
   return !!option.isSelected;
 }
+
+export function countSelectedInQuestion(
+  questionOptions: QuestionnaireOption[],
+  selections: QuestionnaireSelectionMap,
+): number {
+  return questionOptions.filter(o => isQuestionnaireOptionSelected(o, selections)).length;
+}
+
+export function detectMultiSelectQuestions(
+  questionnaire: Questionnaire | null | undefined,
+): string[] {
+  const keys: string[] = [];
+  for (const question of questionnaire?.questions ?? []) {
+    if (question.options.filter(o => o.isSelected).length > 1) {
+      keys.push(question.number);
+    }
+  }
+  return keys;
+}

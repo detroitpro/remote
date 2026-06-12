@@ -7,7 +7,7 @@ export interface QuestionnaireQuestionProps {
   question: QuestionnaireQuestionType;
   index: number;
   optimisticSelections: QuestionnaireSelectionMap;
-  onSelectOption: (questionOptions: QuestionnaireOption[], option: QuestionnaireOption) => void;
+  onSelectOption: (questionNumber: string, questionOptions: QuestionnaireOption[], option: QuestionnaireOption) => void;
 }
 
 export function QuestionnaireQuestion({
@@ -29,7 +29,7 @@ export function QuestionnaireQuestion({
             key={`${option.letter}:${option.selectorPath}`}
             option={option}
             optimisticSelections={optimisticSelections}
-            onSelect={selected => onSelectOption(question.options, selected)}
+            onSelect={selected => onSelectOption(question.number, question.options, selected)}
           />
         ))}
       </div>
