@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 import { buildEnvFromConfig } from './config-bridge.js';
 import { appendLogLine, type UnifiedOutputChannel } from './output-channel.js';
 import { updateStatusBar, type HealthData, type ServerState } from './status-bar.js';
+import type { GitLocalStatusSummary } from './git-status-display.js';
 
 const HEALTH_POLL_INTERVAL_MS = 5000;
 const SHUTDOWN_TIMEOUT_MS = 3000;
@@ -24,6 +25,7 @@ export class ServerManager extends EventEmitter {
   private _reactingToFlag = false;
   private _startInFlight: Promise<void> | null = null;
   private getLicenseKey: () => Promise<string | undefined>;
+  private getLocalGitStatus: (() => GitLocalStatusSummary | null) | null = null;
   private readonly windowName: string;
   private readonly manualStopPath: string;
   private dirWatcher: FSWatcher | null = null;
@@ -38,6 +40,19 @@ export class ServerManager extends EventEmitter {
 
   get isOwner(): boolean {
     return this._isOwner;
+  }
+
+  setLocalGitStatusProvider(provider: () => GitLocalStatusSummary | null): void {
+    this.getLocalGitStatus = provider;
+  }
+
+  refreshStatusBar(): void {
+    updateStatusBar(
+      this.statusBarItem,
+      this._serverState,
+      this.lastHealth ?? undefined,
+      this.getLocalGitStatus?.() ?? null,
+    );
   }
 
   constructor(
@@ -308,7 +323,7 @@ export class ServerManager extends EventEmitter {
 
   private setState(state: ServerState): void {
     this._serverState = state;
-    updateStatusBar(this.statusBarItem, state, this.lastHealth ?? undefined);
+    this.refreshStatusBar();
     this.emit('stateChanged', state);
   }
 

@@ -3,7 +3,18 @@ export interface GitChangeLike {
   resourceUri?: { toString(): string };
 }
 
+export interface GitHeadLike {
+  name?: string;
+  ahead?: number;
+  behind?: number;
+  upstream?: {
+    remote: string;
+    name: string;
+  };
+}
+
 export interface GitRepositoryStateLike {
+  HEAD?: GitHeadLike;
   mergeChanges?: GitChangeLike[];
   indexChanges?: GitChangeLike[];
   workingTreeChanges?: GitChangeLike[];

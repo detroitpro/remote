@@ -61,6 +61,10 @@
       {
         "command": "cursorRemote.openSetup",
         "title": "CursorRemote: Open Setup Panel"
+      },
+      {
+        "command": "cursorRemote.refreshGitStatus",
+        "title": "CursorRemote: Refresh Git Status"
       }
     ],
     "configuration": {

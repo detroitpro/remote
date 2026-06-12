@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import type { ServerIdentity } from '../../src/shared/diagnostics.js';
+import type { GitLocalStatusSummary } from './git-status-display.js';
+import { formatGitTooltipLine } from './git-status-display.js';
 
 export interface HealthData {
   ok: boolean;
@@ -32,14 +34,15 @@ export function createStatusBar(context: vscode.ExtensionContext): vscode.Status
 export function updateStatusBar(
   item: vscode.StatusBarItem,
   state: ServerState,
-  health?: HealthData
+  health?: HealthData,
+  localGit?: GitLocalStatusSummary | null,
 ): void {
   switch (state) {
     case 'running':
       item.text = '$(radio-tower) Remote: Running';
       item.backgroundColor = undefined;
       item.color = '#3fa266';
-      item.tooltip = buildTooltip(health);
+      item.tooltip = buildTooltip(health, localGit);
       item.command = 'cursorRemote.status.focus';
       break;
     case 'disconnected':
@@ -66,7 +69,7 @@ export function updateStatusBar(
   }
 }
 
-function buildTooltip(health?: HealthData): string {
+function buildTooltip(health?: HealthData, localGit?: GitLocalStatusSummary | null): string {
   if (!health) return 'Running';
   const lines = [
     health.server
@@ -75,7 +78,9 @@ function buildTooltip(health?: HealthData): string {
     `Clients: ${health.clients}`,
     `Agent: ${health.agentStatus}`,
   ];
-  if (health.gitStatus?.available) lines.push(`Git changes: ${health.gitStatus.changedCount}`);
+  const gitLine = formatGitTooltipLine(localGit ?? null);
+  if (gitLine) lines.push(gitLine);
+  else if (health.gitStatus?.available) lines.push(`Git changes: ${health.gitStatus.changedCount}`);
   if (health.mode) lines.push(`Mode: ${health.mode}`);
   if (health.model) lines.push(`Model: ${health.model}`);
   const activeWindow = health.windows?.find(w => w.id === health.activeWindowId);

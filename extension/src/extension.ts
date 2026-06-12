@@ -65,9 +65,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   serverManager.startDirWatcher();
 
   const extensionVersion = context.extension.packageJSON?.version ?? 'unknown';
-  const treeView = new StatusTreeView(serverManager, licenseManager, extensionVersion);
   const gitStateBridge = new GitStateBridge(context, outputChannel, serverManager);
   gitStateBridge.start();
+  serverManager.setLocalGitStatusProvider(() => gitStateBridge.getLocalGitStatus());
+  gitStateBridge.onDidChangeLocalGitStatus(() => {
+    serverManager.refreshStatusBar();
+  });
+
+  const treeView = new StatusTreeView(serverManager, licenseManager, extensionVersion, gitStateBridge);
 
   context.subscriptions.push(
     outputChannel,
@@ -88,6 +93,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       treeView.refresh();
     }),
     vscode.commands.registerCommand('cursorRemote.openSetup', () => SetupPanel.createOrShow(context)),
+    vscode.commands.registerCommand('cursorRemote.refreshGitStatus', () => gitStateBridge.explicitRefreshGitStatus()),
     vscode.commands.registerCommand('cursorRemote.openSourceControl', async () => {
       await vscode.commands.executeCommand('workbench.view.scm');
     }),

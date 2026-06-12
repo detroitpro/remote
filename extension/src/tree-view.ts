@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
 import type { ServerManager } from './server-manager.js';
 import type { LicenseManager } from './license-manager.js';
+import type { GitStateBridge } from './git-state-bridge.js';
 import type { HealthData } from './status-bar.js';
+import { formatGitTreeItem } from './git-status-display.js';
 
 type TreeItem = vscode.TreeItem;
 
@@ -11,16 +13,24 @@ export class StatusTreeView implements vscode.TreeDataProvider<TreeItem> {
 
   private serverManager: ServerManager;
   private licenseManager: LicenseManager;
+  private gitStateBridge: GitStateBridge | null;
   private licensed = false;
   private version: string;
 
-  constructor(serverManager: ServerManager, licenseManager: LicenseManager, version: string) {
+  constructor(
+    serverManager: ServerManager,
+    licenseManager: LicenseManager,
+    version: string,
+    gitStateBridge?: GitStateBridge,
+  ) {
     this.serverManager = serverManager;
     this.licenseManager = licenseManager;
+    this.gitStateBridge = gitStateBridge ?? null;
     this.version = version;
     serverManager.on('health', () => this.refresh());
     serverManager.on('stateChanged', () => this.refresh());
     serverManager.on('stopped', () => this.refresh());
+    gitStateBridge?.onDidChangeLocalGitStatus(() => this.refresh());
 
     licenseManager.checkLicense().then(valid => {
       this.licensed = valid;
@@ -132,15 +142,11 @@ export class StatusTreeView implements vscode.TreeDataProvider<TreeItem> {
       if (descParts.length > 0) agentItem.description = descParts.join(' / ');
       items.push(agentItem);
 
+      this.pushGitStatusItem(items);
+
       const clientItem = new vscode.TreeItem(`Clients: ${health.clients}`);
       clientItem.iconPath = new vscode.ThemeIcon('device-mobile');
       items.push(clientItem);
-
-      if (health.gitStatus?.available) {
-        const gitItem = new vscode.TreeItem(`Git changes: ${health.gitStatus.changedCount}`);
-        gitItem.iconPath = new vscode.ThemeIcon('source-control');
-        items.push(gitItem);
-      }
 
       if (health.pendingApprovalCount > 0) {
         const approvalItem = new vscode.TreeItem(
@@ -158,6 +164,8 @@ export class StatusTreeView implements vscode.TreeDataProvider<TreeItem> {
         windowsItem.description = health.windows.map(w => w.title).join(', ');
         items.push(windowsItem);
       }
+    } else if (state !== 'stopped') {
+      this.pushGitStatusItem(items);
     }
 
     items.push(separator());
@@ -178,6 +186,22 @@ export class StatusTreeView implements vscode.TreeDataProvider<TreeItem> {
     items.push(logsItem);
 
     return items;
+  }
+
+  private pushGitStatusItem(items: TreeItem[]): void {
+    if (!this.gitStateBridge) return;
+
+    const gitSummary = this.gitStateBridge.getLocalGitStatus();
+    const gitDisplay = formatGitTreeItem(gitSummary);
+    const gitItem = new vscode.TreeItem(gitDisplay.label);
+    gitItem.iconPath = new vscode.ThemeIcon(gitDisplay.icon);
+    if (gitDisplay.description) {
+      gitItem.description = gitDisplay.description;
+    }
+    if (!gitSummary?.available) {
+      gitItem.command = { command: 'cursorRemote.refreshGitStatus', title: 'Refresh Git Status' };
+    }
+    items.push(gitItem);
   }
 }
 

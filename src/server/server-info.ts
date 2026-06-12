@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -10,6 +11,25 @@ export function getServerModuleDir(): string {
 
 function moduleDir(): string {
   return getServerModuleDir();
+}
+
+function toDevBuildVersion(version: string, packageRoot: string): string {
+  if (!version.includes('-local')) return version;
+
+  const baseVersion = version.split(/[-+]/)[0] ?? version;
+  try {
+    const hash = execSync('git rev-parse --short HEAD', {
+      cwd: packageRoot,
+      encoding: 'utf-8',
+    }).trim();
+    const dirty = execSync('git status --porcelain', {
+      cwd: packageRoot,
+      encoding: 'utf-8',
+    }).trim();
+    return `${baseVersion}+${dirty ? `${hash}.dirty` : hash}`;
+  } catch {
+    return version;
+  }
 }
 
 function loadPackageVersion(): string {
@@ -25,7 +45,9 @@ function loadPackageVersion(): string {
     if (!existsSync(path)) continue;
     try {
       const pkg = JSON.parse(readFileSync(path, 'utf-8')) as { name?: string; version?: string };
-      if (pkg.name === 'cursor-remote' && pkg.version) return pkg.version;
+      if (pkg.name === 'cursor-remote' && pkg.version) {
+        return toDevBuildVersion(pkg.version, dir);
+      }
     } catch {
       // try next candidate
     }

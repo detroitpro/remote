@@ -20,10 +20,26 @@ export interface ExtensionBridgeDiagnostics {
   gitBridgeDebug: GitBridgeDebugInfo | null;
 }
 
+export type GitSnapshotReason =
+  | 'initial'
+  | 'state-change'
+  | 'repo-open'
+  | 'repo-close'
+  | 'server-started'
+  | 'explicit-refresh';
+
 export interface GitBridgeRepoDebugInfo {
   rootUri: string;
   label: string;
   changedCount: number;
+  branch?: string | null;
+  upstream?: string | null;
+  ahead?: number;
+  behind?: number;
+  staged?: number;
+  changed?: number;
+  untracked?: number;
+  merge?: number;
 }
 
 export interface GitBridgeDebugInfo {
@@ -38,7 +54,13 @@ export interface GitBridgeDebugInfo {
   repoLabel?: string;
   changedCount?: number;
   repoBreakdown?: GitBridgeRepoDebugInfo[];
-  runGitStatus: boolean;
+  /** @deprecated use gitLastSnapshotReason */
+  runGitStatus?: boolean;
+  gitProviderMode?: 'vscode.git.state-cache';
+  gitRepositoryCount?: number;
+  gitLastSnapshotAt?: number;
+  gitLastSnapshotReason?: GitSnapshotReason;
+  gitExplicitRefreshCount?: number;
   lastPushAt?: number;
   lastPushOk?: boolean;
   lastPushError?: string;

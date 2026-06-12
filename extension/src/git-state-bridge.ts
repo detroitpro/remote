@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from 'fs';
 import type { UnifiedOutputChannel } from './output-channel.js';
 import type { ServerManager } from './server-manager.js';
+import { GitSnapshotProvider } from './git-snapshot-provider.js';
 import type {
   GitSnapshotPushPayload,
   GitStatusInfo,
@@ -14,46 +15,27 @@ import {
   openSourceControlRequestPath,
   openSourceControlResultPath,
 } from '../../src/shared/extension-bridge.js';
-import type { GitBridgeDebugInfo, GitBridgeRepoDebugInfo } from '../../src/shared/diagnostics.js';
-import { countGitChanges, countGitChangesAcrossRepositories } from '../../src/shared/git-status-count.js';
+import type { GitBridgeDebugInfo } from '../../src/shared/diagnostics.js';
+import { snapshotSignature, type GitWindowSnapshotResult } from '../../src/shared/git-snapshot.js';
 import { resolveWorkspaceIdentity } from '../../src/shared/workspace-identity.js';
-
-const REFRESH_INTERVAL_MS = 5000;
-const REPO_CHANGE_DEBOUNCE_MS = 500;
-
-interface GitExtensionApi {
-  repositories: GitRepository[];
-  getRepository?(uri: vscode.Uri): GitRepository | null;
-}
-
-interface GitRepository {
-  rootUri: vscode.Uri;
-  status?(): Promise<void>;
-  state: {
-    workingTreeChanges: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri }>;
-    indexChanges: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri }>;
-    mergeChanges: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri }>;
-    untrackedChanges?: Array<{ uri: vscode.Uri; resourceUri?: vscode.Uri }>;
-    onDidChange: vscode.Event<void>;
-  };
-}
+import type { GitLocalStatusSummary } from './git-status-display.js';
 
 export class GitStateBridge implements vscode.Disposable {
   private readonly context: vscode.ExtensionContext;
   private readonly outputChannel: UnifiedOutputChannel;
   private readonly serverManager: ServerManager;
+  private readonly snapshotProvider: GitSnapshotProvider;
+  private readonly onDidChangeLocalGitStatusEmitter = new vscode.EventEmitter<void>();
   private requestWatcher: FSWatcher | null = null;
-  private refreshTimer: ReturnType<typeof setInterval> | null = null;
-  private repoListeners = new Map<string, vscode.Disposable>();
   private lastRequestId = '';
   private lastWrittenGitStatus = '';
   private lastPushedSignature = '';
-  private repoChangeDebounce: ReturnType<typeof setTimeout> | null = null;
-  private refreshInFlight: Promise<void> | null = null;
-  private suppressRepoChange = false;
+  private lastLocalSnapshot: GitWindowSnapshotResult | null = null;
   private extensionVersion: string;
   private extensionInstanceId: string;
   private disposed = false;
+
+  readonly onDidChangeLocalGitStatus = this.onDidChangeLocalGitStatusEmitter.event;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -68,6 +50,12 @@ export class GitStateBridge implements vscode.Disposable {
       ?? vscode.env.sessionId
       ?? `ext-${Date.now()}`;
     void context.globalState.update('gitBridgeInstanceId', this.extensionInstanceId);
+
+    this.snapshotProvider = new GitSnapshotProvider(outputChannel, {
+      resolveWindowKey: () => this.resolveWindowKey(),
+      resolveRepoLabel: () => this.resolveRepoLabel(),
+      resolveWorkspaceFolderPath: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null,
+    });
   }
 
   start(): void {
@@ -76,20 +64,21 @@ export class GitStateBridge implements vscode.Disposable {
       mkdirSync(dataDir, { recursive: true });
     }
 
+    this.snapshotProvider.onDidChangeSnapshot(snapshot => {
+      void this.pushFromSnapshot(snapshot);
+    });
+
     this.serverManager.on('stateChanged', () => {
       void this.handleOpenSourceControlRequest();
     });
     this.serverManager.on('started', () => {
       this.lastWrittenGitStatus = '';
       this.lastPushedSignature = '';
-      void this.refreshGitStatus(true);
+      this.snapshotProvider.emitCurrentSnapshot('server-started');
     });
-    void this.refreshGitStatus(true);
-    void this.handleOpenSourceControlRequest();
 
-    this.refreshTimer = setInterval(() => {
-      void this.refreshGitStatus(true);
-    }, REFRESH_INTERVAL_MS);
+    void this.snapshotProvider.start();
+    void this.handleOpenSourceControlRequest();
 
     try {
       this.requestWatcher = watch(dataDir, (_eventType, filename) => {
@@ -101,43 +90,33 @@ export class GitStateBridge implements vscode.Disposable {
     }
   }
 
+  explicitRefreshGitStatus(): Promise<void> {
+    return this.snapshotProvider.explicitRefresh('explicit-refresh');
+  }
+
+  getLocalGitStatus(): GitLocalStatusSummary | null {
+    const diagnostics = this.snapshotProvider.getDiagnostics();
+    if (!this.lastLocalSnapshot && diagnostics.gitLastSnapshotReason == null) {
+      return null;
+    }
+
+    return {
+      available: this.lastLocalSnapshot?.available ?? false,
+      changedCount: this.lastLocalSnapshot?.changedCount ?? 0,
+      repoLabel: this.lastLocalSnapshot?.available ? this.lastLocalSnapshot.repoLabel : undefined,
+      error: diagnostics.lastError,
+      reason: this.lastLocalSnapshot?.reason ?? diagnostics.gitLastSnapshotReason,
+    };
+  }
+
   dispose(): void {
     this.disposed = true;
     if (this.requestWatcher) {
       this.requestWatcher.close();
       this.requestWatcher = null;
     }
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = null;
-    }
-    if (this.repoChangeDebounce) {
-      clearTimeout(this.repoChangeDebounce);
-      this.repoChangeDebounce = null;
-    }
-    for (const disposable of this.repoListeners.values()) {
-      disposable.dispose();
-    }
-    this.repoListeners.clear();
-  }
-
-  private refreshGitStatus(runGitStatus = false): Promise<void> {
-    if (this.disposed) return Promise.resolve();
-    if (this.refreshInFlight) return this.refreshInFlight;
-
-    this.refreshInFlight = this.refreshGitStatusNow(runGitStatus).finally(() => {
-      this.refreshInFlight = null;
-    });
-    return this.refreshInFlight;
-  }
-
-  private scheduleRefreshFromRepoChange(): void {
-    if (this.disposed) return;
-    if (this.repoChangeDebounce) clearTimeout(this.repoChangeDebounce);
-    this.repoChangeDebounce = setTimeout(() => {
-      this.repoChangeDebounce = null;
-      void this.refreshGitStatus(false);
-    }, REPO_CHANGE_DEBOUNCE_MS);
+    this.snapshotProvider.dispose();
+    this.onDidChangeLocalGitStatusEmitter.dispose();
   }
 
   private resolveWindowKey(): string {
@@ -156,95 +135,58 @@ export class GitStateBridge implements vscode.Disposable {
     });
   }
 
-  private async refreshGitStatusNow(runGitStatus: boolean): Promise<void> {
+  private resolveRepoLabel(): string | undefined {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    return folder?.name || undefined;
+  }
+
+  private async pushFromSnapshot(snapshot: GitWindowSnapshotResult): Promise<void> {
+    if (this.disposed) return;
+
+    this.lastLocalSnapshot = snapshot;
+    this.onDidChangeLocalGitStatusEmitter.fire();
+
     const windowName = vscode.workspace.name
       ?? vscode.workspace.workspaceFolders?.[0]?.name
       ?? 'unknown';
-    const windowKey = this.resolveWindowKey();
+    const providerDiagnostics = this.snapshotProvider.getDiagnostics();
     const debugBase: GitBridgeDebugInfo = {
-      updatedAt: Date.now(),
+      updatedAt: snapshot.updatedAt,
       extensionVersion: this.extensionVersion,
       windowName,
-      windowKey,
+      windowKey: snapshot.windowKey,
       isOwner: this.serverManager.isOwner,
-      gitApiAvailable: false,
-      repoCount: 0,
-      repoResolved: false,
-      runGitStatus,
+      gitApiAvailable: providerDiagnostics.gitApiAvailable,
+      repoCount: providerDiagnostics.gitRepositoryCount,
+      repoResolved: providerDiagnostics.repoResolved,
+      repoLabel: snapshot.available ? snapshot.repoLabel : undefined,
+      changedCount: snapshot.changedCount,
+      repoBreakdown: snapshot.repoBreakdown,
+      gitProviderMode: 'vscode.git.state-cache',
+      gitRepositoryCount: providerDiagnostics.gitRepositoryCount,
+      gitLastSnapshotAt: providerDiagnostics.gitLastSnapshotAt ?? snapshot.updatedAt,
+      gitLastSnapshotReason: snapshot.reason,
+      gitExplicitRefreshCount: providerDiagnostics.gitExplicitRefreshCount,
+      lastError: providerDiagnostics.lastError,
     };
 
-    const git = await this.getGitApi();
-    if (!git) {
-      this.writeGitBridgeDebug({ ...debugBase, lastError: 'vscode.git unavailable' });
-      await this.pushGitSnapshot({
-        available: false,
-        changedCount: 0,
-        updatedAt: Date.now(),
-        source: 'vscode.git',
-        windowKey,
-      }, windowKey, debugBase);
-      return;
-    }
-
-    debugBase.gitApiAvailable = true;
-    debugBase.repoCount = git.repositories.length;
-    const repositories = this.resolveRepositories(git);
-    this.ensureRepoListeners(repositories);
-    if (!repositories.length) {
-      this.writeGitBridgeDebug({ ...debugBase, lastError: 'no repository for workspace' });
-      await this.pushGitSnapshot({
-        available: false,
-        changedCount: 0,
-        updatedAt: Date.now(),
-        source: 'vscode.git',
-        windowKey,
-      }, windowKey, debugBase);
-      return;
-    }
-
-    debugBase.repoResolved = true;
-    debugBase.repoLabel = vscode.workspace.workspaceFolders?.[0]?.name || repositories[0].rootUri.fsPath.split(/[\\/]/).pop() || 'workspace';
-
-    if (runGitStatus) {
-      this.suppressRepoChange = true;
-      try {
-        for (const repo of repositories) {
-          await repo.status?.();
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        this.outputChannel.warn(`[git-bridge] repo.status() failed: ${message}`);
-        debugBase.lastError = message;
-      } finally {
-        this.suppressRepoChange = false;
-      }
-    }
-
-    const repoBreakdown: GitBridgeRepoDebugInfo[] = repositories.map(repo => ({
-      rootUri: repo.rootUri.toString(),
-      label: repo.rootUri.fsPath.split(/[\\/]/).pop() || repo.rootUri.fsPath,
-      changedCount: countGitChanges(repo.state),
-    }));
-    const changedCount = countGitChangesAcrossRepositories(repositories.map(repo => repo.state));
-    debugBase.changedCount = changedCount;
-    debugBase.repoBreakdown = repoBreakdown;
-
-    const payload: GitStatusInfo = {
-      available: true,
-      changedCount,
-      repoLabel: debugBase.repoLabel,
-      updatedAt: Date.now(),
+    const gitStatus: GitStatusInfo = {
+      available: snapshot.available,
+      changedCount: snapshot.changedCount,
+      repoLabel: snapshot.available ? snapshot.repoLabel : undefined,
+      updatedAt: snapshot.updatedAt,
       source: 'vscode.git',
-      windowKey,
+      windowKey: snapshot.windowKey,
     };
-    await this.pushGitSnapshot(payload, windowKey, debugBase, repoBreakdown);
+
+    await this.pushGitSnapshot(gitStatus, snapshot.windowKey, debugBase, snapshot.repoBreakdown);
   }
 
   private async pushGitSnapshot(
     gitStatus: GitStatusInfo,
     windowKey: string,
     debugBase: GitBridgeDebugInfo,
-    repoBreakdown?: GitBridgeRepoDebugInfo[],
+    repoBreakdown?: GitBridgeDebugInfo['repoBreakdown'],
   ): Promise<void> {
     const pushPayload: GitSnapshotPushPayload = {
       windowKey,
@@ -254,7 +196,16 @@ export class GitStateBridge implements vscode.Disposable {
       extensionInstanceId: this.extensionInstanceId,
     };
 
-    const signature = `${windowKey}:${gitStatus.available}:${gitStatus.changedCount}:${JSON.stringify(repoBreakdown ?? [])}`;
+    const signature = snapshotSignature({
+      windowKey,
+      available: gitStatus.available,
+      changedCount: gitStatus.changedCount,
+      repoLabel: gitStatus.repoLabel,
+      repoBreakdown: repoBreakdown ?? [],
+      repoSnapshots: [],
+      updatedAt: gitStatus.updatedAt,
+      reason: debugBase.gitLastSnapshotReason ?? 'initial',
+    });
 
     if (this.serverManager.isOwner) {
       this.writeGitStatus(gitStatus);
@@ -301,51 +252,6 @@ export class GitStateBridge implements vscode.Disposable {
         lastPushError: err instanceof Error ? err.message : String(err),
       };
     }
-  }
-
-  private ensureRepoListeners(repositories: GitRepository[]): void {
-    const nextKeys = new Set(repositories.map(repo => repo.rootUri.toString()));
-
-    for (const [key, disposable] of this.repoListeners) {
-      if (nextKeys.has(key)) continue;
-      disposable.dispose();
-      this.repoListeners.delete(key);
-    }
-
-    for (const repo of repositories) {
-      const key = repo.rootUri.toString();
-      if (this.repoListeners.has(key)) continue;
-      this.repoListeners.set(key, repo.state.onDidChange(() => {
-        if (this.suppressRepoChange) return;
-        this.scheduleRefreshFromRepoChange();
-      }));
-    }
-  }
-
-  private async getGitApi(): Promise<GitExtensionApi | null> {
-    try {
-      const extension = vscode.extensions.getExtension('vscode.git');
-      if (!extension) return null;
-      const exports = extension.isActive ? extension.exports : await extension.activate();
-      const api = exports?.getAPI?.(1) as GitExtensionApi | undefined;
-      return api ?? null;
-    } catch (err) {
-      this.outputChannel.warn(`[git-bridge] Failed to activate vscode.git: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
-    }
-  }
-
-  private resolveRepositories(git: GitExtensionApi): GitRepository[] {
-    if (!git.repositories.length) return [];
-    const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
-    if (!workspaceUri) return [...git.repositories];
-
-    const workspacePath = normalizePath(workspaceUri.fsPath);
-    const exactMatches = git.repositories.filter(repo => normalizePath(repo.rootUri.fsPath) === workspacePath);
-    if (exactMatches.length) return exactMatches;
-
-    const nestedMatches = git.repositories.filter(repo => workspacePath.startsWith(normalizePath(repo.rootUri.fsPath) + '/'));
-    return nestedMatches.length ? nestedMatches : [...git.repositories];
   }
 
   private writeGitStatus(payload: GitStatusInfo | null): void {
@@ -408,8 +314,4 @@ export class GitStateBridge implements vscode.Disposable {
       'utf-8'
     );
   }
-}
-
-function normalizePath(value: string): string {
-  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
