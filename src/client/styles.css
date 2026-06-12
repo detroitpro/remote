@@ -31,7 +31,11 @@
   --header-height: 44px;
 
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+  /* VS Code / Cursor editor stack (Consolas on Windows, Menlo on macOS) */
+  --font-mono: Consolas, 'Courier New', Menlo, Monaco, 'Cascadia Mono', 'Segoe UI Mono', monospace;
+  --font-editor: var(--font-mono);
+  --editor-font-size: 14px;
+  --editor-line-height: 19px;
 
   /* Scrollbars: opaque dark track avoids UA light (white/grey) fallback */
   --scrollbar-track: rgba(0, 0, 0, 0.45);
@@ -2823,7 +2827,7 @@ header {
   inset: 0;
   display: flex;
   flex-direction: column;
-  background: #181818;
+  background: #1e1e1e;
 }
 
 .git-diff-header {
@@ -2863,13 +2867,45 @@ header {
 .git-diff-scroll {
   flex: 1;
   overflow: auto;
-  padding: 8px 0 16px;
+  padding: 0 0 16px;
+  background: #1e1e1e;
+  font-family: var(--font-editor);
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
+  font-weight: 400;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  -webkit-font-smoothing: auto;
+  tab-size: 4;
+}
+
+.git-diff-scroll .code-block-diff-line {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  padding: 0 16px;
+  margin: 0;
+  border-radius: 0;
+  min-height: var(--editor-line-height);
+  box-sizing: border-box;
+}
+
+.git-diff-scroll .code-block-diff-line--add {
+  padding-left: 13px;
+}
+
+.git-diff-scroll .code-block-diff-line--rem {
+  padding-left: 13px;
 }
 
 .git-diff-hunk-header {
-  padding: 6px 12px;
-  font-size: 11px;
-  opacity: 0.7;
+  padding: 0 16px;
+  font-family: var(--font-editor);
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
+  font-weight: 400;
+  font-variant-ligatures: none;
+  color: rgba(228, 228, 228, 0.55);
   background: rgba(255, 255, 255, 0.03);
 }
 

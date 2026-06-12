@@ -174,6 +174,7 @@ export class GitScmService {
         repoId: file.repoId,
         path: file.path,
         stage: effectiveStage,
+        bucket: file.bucket,
       });
       if (!actionResult.ok) {
         throw new Error(actionResult.error || 'Diff request failed');

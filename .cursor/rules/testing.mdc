@@ -1,0 +1,23 @@
+---
+description: Kdy psát testy — málo, jen klíčové věci nebo dočasně k ověření
+alwaysApply: true
+---
+
+# Testování
+
+## Kdy test psát
+
+- **Ano** — kritická business logika, parsery, state sync, regresní bug, složitá větev bez snadné vizuální kontroly.
+- **Ano dočasně** — krátký test jen k ověření hypotézy během debugu; po fixu smazat nebo sloučit do jednoho smysluplného případu.
+- **Ne** — triviální getter/setter, UI layout, „test že komponenta existuje“, duplicitní pokrytí stejné větve, testy jen kvůli pocitu „hotovo“.
+
+## Jak psát
+
+- Preferuj **1–3 cílené testy** místo rozsáhlé suite.
+- Nepřidávej test automaticky ke každé změně — nejdřív zvaž, jestli bez něj projde smysluplné `npm test` a manuální kontrola.
+- Po refaktoru maž testy, které už nic nechrání.
+
+## Ověření změn
+
+- `npm test` pořád platí před „hotovo“, ale **nepiš nové testy**, pokud to není nutné podle pravidel výše.
+- Web UI: statické soubory / refresh prohlížeče; CSS a socket chování unit testy nevidí.

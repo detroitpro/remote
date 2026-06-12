@@ -112,6 +112,7 @@ export interface GitActionRequest {
   paths?: string[];
   stage?: GitDiffStageView;
   hunkCursor?: string;
+  bucket?: GitFileBucket;
 }
 
 export interface GitActionResult {

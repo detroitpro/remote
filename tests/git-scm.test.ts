@@ -6,7 +6,7 @@ import {
   paginateFiles,
 } from '../src/shared/git-file-list.js';
 import { parseFileId } from '../src/shared/git-repo-id.js';
-import { parseUnifiedDiff, summarizeDiff } from '../src/shared/git-diff-parser.js';
+import { parseUnifiedDiff, summarizeDiff, buildNewFileUnifiedDiff } from '../src/shared/git-diff-parser.js';
 
 test('buildFileListFromRepo maps buckets from git state', () => {
   const files = buildFileListFromRepo({
@@ -126,6 +126,16 @@ test('resolveDiffStage prefers index for staged bucket', async () => {
   };
   assert.equal(resolveDiffStage(stagedFile, 'working'), 'index');
   assert.equal(resolveDiffStage({ ...stagedFile, bucket: 'changes' }, 'working'), 'working');
+});
+
+test('buildNewFileUnifiedDiff parses as all insertions', () => {
+  const diff = buildNewFileUnifiedDiff('src/new.ts', 'line one\nline two\n');
+  const chunks = parseUnifiedDiff(diff);
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0]?.lines.length, 2);
+  const summary = summarizeDiff(chunks);
+  assert.equal(summary.insertions, 2);
+  assert.equal(summary.deletions, 0);
 });
 
 test('parseUnifiedDiff splits hunks and counts stats', () => {

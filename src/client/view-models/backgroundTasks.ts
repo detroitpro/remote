@@ -1,4 +1,6 @@
 import type { BackgroundTask, CursorState } from '../../server/types.js';
+import type { GitStatusInfo } from '../../shared/extension-bridge.js';
+import type { GitScmSnapshot } from '../../shared/git-scm.js';
 
 export function getVisibleBackgroundTasks(state: CursorState): BackgroundTask[] {
   return state.backgroundTasks || [];
@@ -38,6 +40,31 @@ export function getBackgroundTasksForSheet(tasks: BackgroundTask[]): BackgroundT
   return tasks.filter(task => !isForegroundWaitingBackgroundTask(task));
 }
 
-export function getVisibleGitStatus(state: CursorState) {
-  return state.gitStatus?.available ? state.gitStatus : null;
+function gitStatusFromScm(scm: GitScmSnapshot): GitStatusInfo {
+  const changedCount = scm.repos.reduce(
+    (sum, repo) => sum
+      + repo.counts.staged
+      + repo.counts.changes
+      + repo.counts.untracked
+      + repo.counts.conflicts,
+    0,
+  );
+  return {
+    available: true,
+    changedCount,
+    repoLabel: scm.repos[0]?.label,
+    updatedAt: scm.updatedAt,
+    source: 'vscode.git',
+    windowKey: scm.windowKey,
+  };
+}
+
+export function getVisibleGitStatus(state: CursorState): GitStatusInfo | null {
+  if (state.gitStatus?.available) {
+    return state.gitStatus;
+  }
+  if (state.gitScm) {
+    return gitStatusFromScm(state.gitScm);
+  }
+  return null;
 }

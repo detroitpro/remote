@@ -42,6 +42,8 @@ export class GitStateBridge implements vscode.Disposable {
   private lastGitActionRequestId = '';
   private lastPushedSignature = '';
   private lastSeenServerInstanceId: string | null = null;
+  private lastGitRecoveryPushAt = 0;
+  private static readonly GIT_RECOVERY_PUSH_INTERVAL_MS = 30_000;
   private lastLocalSnapshot: GitWindowSnapshotResult | null = null;
   private extensionInstanceId: string;
   private disposed = false;
@@ -143,11 +145,24 @@ export class GitStateBridge implements vscode.Disposable {
 
   private handleServerHealth(health: HealthData): void {
     const instanceId = health.server?.instanceId;
-    if (!instanceId || this.lastSeenServerInstanceId === instanceId) return;
+    if (instanceId && this.lastSeenServerInstanceId !== instanceId) {
+      this.lastSeenServerInstanceId = instanceId;
+      this.lastPushedSignature = '';
+      this.snapshotProvider.emitCurrentSnapshot('server-started');
+      return;
+    }
 
-    this.lastSeenServerInstanceId = instanceId;
+    if (health.gitStatus != null || !this.lastLocalSnapshot?.available) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - this.lastGitRecoveryPushAt < GitStateBridge.GIT_RECOVERY_PUSH_INTERVAL_MS) {
+      return;
+    }
+    this.lastGitRecoveryPushAt = now;
     this.lastPushedSignature = '';
-    this.snapshotProvider.emitCurrentSnapshot('server-started');
+    void this.pushFromSnapshot(this.lastLocalSnapshot);
   }
 
   private resolveWindowKey(): string {

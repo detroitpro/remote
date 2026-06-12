@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import type { GitActionRequest, GitActionResult } from '../../src/shared/git-scm.js';
+import type { GitActionRequest, GitActionResult, GitFileBucket } from '../../src/shared/git-scm.js';
 import type { GitDiffStageView } from '../../src/shared/git-scm.js';
+import { buildNewFileUnifiedDiff } from '../../src/shared/git-diff-parser.js';
 import { repoIdFromRootUri } from '../../src/shared/git-repo-id.js';
 import { resolveRepositories, type GitRepoLike } from '../../src/shared/git-snapshot.js';
 import type { GitSnapshotProvider } from './git-snapshot-provider.js';
@@ -84,6 +85,43 @@ export class GitActionExecutor {
     return path.replace(/\\/g, '/');
   }
 
+  private pathToUri(repo: GitRepository, relativePath: string): vscode.Uri {
+    const segments = this.normalizeRepoPath(relativePath).split('/').filter(Boolean);
+    return vscode.Uri.joinPath(repo.rootUri, ...segments);
+  }
+
+  private looksBinary(bytes: Uint8Array): boolean {
+    const limit = Math.min(bytes.length, 8000);
+    for (let i = 0; i < limit; i += 1) {
+      if (bytes[i] === 0) return true;
+    }
+    return false;
+  }
+
+  private async readWorkingFileDiff(
+    repo: GitRepository,
+    relativePath: string,
+    base: GitActionResult,
+  ): Promise<GitActionResult> {
+    const uri = this.pathToUri(repo, relativePath);
+    const bytes = await vscode.workspace.fs.readFile(uri);
+    if (this.looksBinary(bytes)) {
+      return {
+        ...base,
+        ok: true,
+        diffText: 'Binary files differ\n',
+        isBinary: true,
+      };
+    }
+    const content = new TextDecoder('utf-8').decode(bytes);
+    return {
+      ...base,
+      ok: true,
+      diffText: buildNewFileUnifiedDiff(relativePath, content),
+      isBinary: false,
+    };
+  }
+
   private async executeDiff(
     request: GitActionRequest,
     base: GitActionResult,
@@ -98,6 +136,19 @@ export class GitActionExecutor {
 
     const relativePath = this.normalizeRepoPath(String(request.path));
     const stage: GitDiffStageView = request.stage === 'index' ? 'index' : 'working';
+    const bucket = request.bucket as GitFileBucket | undefined;
+
+    if (bucket === 'untracked') {
+      try {
+        return await this.readWorkingFileDiff(repo, relativePath, base);
+      } catch (err) {
+        return {
+          ...base,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+
     let diffText = '';
     if (stage === 'index' && repo.diffIndexWithHEAD) {
       diffText = await repo.diffIndexWithHEAD(relativePath);
@@ -107,6 +158,17 @@ export class GitActionExecutor {
       diffText = await repo.diffIndexWithHEAD(relativePath);
     } else {
       return { ...base, error: 'Git diff API unavailable' };
+    }
+
+    if (!diffText.trim()) {
+      try {
+        return await this.readWorkingFileDiff(repo, relativePath, base);
+      } catch (err) {
+        return {
+          ...base,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
     }
 
     const isBinary = diffText.startsWith('Binary files') || diffText.includes('GIT binary patch');

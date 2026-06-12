@@ -26,6 +26,23 @@ function parseHunkHeader(line: string): {
   };
 }
 
+export function buildNewFileUnifiedDiff(relativePath: string, content: string): string {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const body = normalized.endsWith('\n') ? normalized.slice(0, -1) : normalized;
+  const lines = body.length === 0 ? [] : body.split('\n');
+  const header = [
+    `diff --git a/${relativePath} b/${relativePath}`,
+    'new file mode 100644',
+    '--- /dev/null',
+    `+++ b/${relativePath}`,
+    `@@ -0,0 +1,${Math.max(lines.length, 0)} @@`,
+  ].join('\n');
+  if (lines.length === 0) {
+    return `${header}\n`;
+  }
+  return `${header}\n${lines.map(line => `+${line}`).join('\n')}`;
+}
+
 export function parseUnifiedDiff(diffText: string): GitDiffChunk[] {
   const lines = diffText.replace(/\r\n/g, '\n').split('\n');
   const chunks: GitDiffChunk[] = [];
