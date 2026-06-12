@@ -226,14 +226,55 @@ describe('applyDerivedActivityToState', () => {
       pendingApprovals: [],
       inputAvailable: true,
       chatTabs: [],
+      activeComposerId: '',
       mode: { current: 'agent', available: [] },
       model: { current: 'test', currentId: 'test' },
       windows: [],
       activeWindowId: 'w0',
       composerQueue: { items: [] },
+      questionnaire: null,
+      backgroundTasks: [],
+      gitStatus: null,
+      agentStopSelectorPath: '',
+      agentStopAvailable: false,
+      agentStopSource: 'none',
     };
     const result = applyDerivedActivityToState(state);
     assert.deepEqual(result, state);
+  });
+
+  it('does not downgrade busy status to idle while real stop remains available', () => {
+    const state: CursorState = {
+      connected: true,
+      extractorStatus: 'ok',
+      lastExtractionAt: Date.now(),
+      consecutiveExtractionFailures: 0,
+      lastExtractionError: null,
+      agentStatus: 'generating',
+      agentActivityText: null,
+      agentActivityLive: false,
+      agentActivitySource: 'none',
+      messages: [],
+      pendingApprovals: [],
+      inputAvailable: true,
+      chatTabs: [],
+      activeComposerId: '',
+      mode: { current: 'agent', available: [] },
+      model: { current: 'Auto', currentId: '' },
+      windows: [],
+      activeWindowId: '',
+      composerQueue: { items: [] },
+      questionnaire: null,
+      backgroundTasks: [],
+      gitStatus: null,
+      agentStopSelectorPath: '#stop-agent',
+      agentStopAvailable: true,
+      agentStopSource: 'composer',
+      _rawSignals: { shimmer: [], loadingIndicator: false, elements: [], orphanIndicators: [] },
+    };
+    const result = applyDerivedActivityToState(state);
+    assert.equal(result.agentStatus, 'generating');
+    assert.equal(result.agentStopAvailable, true);
   });
 });
 

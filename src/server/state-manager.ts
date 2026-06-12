@@ -53,6 +53,8 @@ function emptyState(): CursorState {
     backgroundTasks: [],
     gitStatus: null,
     agentStopSelectorPath: '',
+    agentStopAvailable: false,
+    agentStopSource: 'none',
   };
 }
 

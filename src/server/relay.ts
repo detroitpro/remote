@@ -2,8 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { createRequire } from 'module';
 import { Server as SocketServer, type Socket } from 'socket.io';
-import { fileURLToPath } from 'url';
-import { basename, dirname, join, resolve } from 'path';
+import { basename, join, resolve } from 'path';
 import { randomBytes, timingSafeEqual } from 'crypto';
 import { readFileSync, existsSync } from 'fs';
 import type { ServerConfig, CursorState, CommandPayload, CommandResult } from './types.js';
@@ -15,7 +14,7 @@ import type { CDPBridge } from './cdp-bridge.js';
 import { CursorStorageHistory } from './cursor-storage-history.js';
 import { markdownToWebHtml, readPlanFile } from './plan-files.js';
 import type { ExtensionFileBridge } from './extension-file-bridge.js';
-import { SERVER_INSTANCE } from './server-info.js';
+import { SERVER_INSTANCE, getServerModuleDir } from './server-info.js';
 import type { ServerDiagnostics } from '../shared/diagnostics.js';
 import { GIT_SNAPSHOT_PUSH_PATH, type GitSnapshotPushPayload } from '../shared/extension-bridge.js';
 import {
@@ -25,8 +24,6 @@ import {
   type WebappSessionStore,
 } from './webapp-sessions.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 const POST_COMMAND_REFRESH_DELAYS_MS = [0, 150, 450, 1000, 2000];
 
 interface ViteDevServer {
@@ -37,7 +34,7 @@ interface ViteDevServer {
 function resolvePackageRoot(): string {
   const fromEnv = process.env.PACKAGE_ROOT?.trim();
   if (fromEnv && existsSync(join(fromEnv, 'package.json'))) return fromEnv;
-  const fromBundle = join(__dirname, '..', '..');
+  const fromBundle = join(getServerModuleDir(), '..', '..');
   if (existsSync(join(fromBundle, 'package.json'))) return fromBundle;
   return process.cwd();
 }
@@ -183,7 +180,7 @@ export class Relay {
     this.requestFreshExtraction = requestFreshExtraction;
     this.storageHistory = new CursorStorageHistory(config.cursorStateDbPath);
     this.sessionStore = createWebappSessionStore(config.dataDir);
-    const resolvedClient = resolveClientDir(__dirname);
+    const resolvedClient = resolveClientDir(getServerModuleDir());
     this.clientDir = resolvedClient.clientDir;
     this.clientBuild = resolvedClient.clientBuild;
     if (this.clientBuild === 'vite-dev') {
@@ -446,6 +443,10 @@ export class Relay {
         agentStatus: state.agentStatus,
         agentActivityText: state.agentActivityText,
         agentActivityLive: state.agentActivityLive,
+        agentActivitySource: state.agentActivitySource,
+        agentStopSelectorPath: state.agentStopSelectorPath,
+        agentStopAvailable: state.agentStopAvailable,
+        agentStopSource: state.agentStopSource,
         pendingApprovals: state.pendingApprovals,
         gitStatus: state.gitStatus,
         chatTabs: state.chatTabs.map((t) => ({
@@ -895,6 +896,35 @@ export class Relay {
           payload.commandId,
           payload.selectorPath
         );
+        if (result.ok) {
+          this.requestFreshExtractionBurst();
+        }
+        socket.emit('command:result', result);
+      });
+
+      socket.on('command:stop_agent', async (payload: CommandPayload) => {
+        if (!payload.commandId) {
+          socket.emit('command:result', {
+            commandId: 'unknown',
+            ok: false,
+            error: 'Missing commandId',
+          } satisfies CommandResult);
+          return;
+        }
+        const state = this.stateManager.getCurrentState();
+        const selectorPath = state.agentStopSelectorPath
+          || state.backgroundTasks.find(task => task.stopSelectorPath)?.stopSelectorPath
+          || '';
+        if (!selectorPath) {
+          socket.emit('command:result', {
+            commandId: payload.commandId,
+            ok: false,
+            error: 'Stop button not available',
+          } satisfies CommandResult);
+          return;
+        }
+        console.log(`[relay] Command: stop_agent from ${socket.id}`);
+        const result = await this.commandExecutor.clickAction(payload.commandId, selectorPath);
         if (result.ok) {
           this.requestFreshExtractionBurst();
         }

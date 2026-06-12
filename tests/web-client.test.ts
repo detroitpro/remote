@@ -201,17 +201,44 @@ describe('web: agent status', () => {
 
     fireFullState(env.mockSocket, {
       ...fixture[1].state!,
-      agentStatus: 'thinking',
-      agentActivityLive: true,
+      agentStatus: 'idle',
+      agentActivityLive: false,
       agentStopSelectorPath: '#stop-agent',
+      agentStopAvailable: true,
+      agentStopSource: 'composer',
     });
     const activeStop = env.document.getElementById('btn-agent-stop') as HTMLButtonElement;
     assert.equal(activeStop.disabled, false);
     act(() => activeStop.click());
 
-    const sent = env.mockSocket.emitted.find(item => item.event === 'command:click_action');
-    assert.ok(sent, 'Expected stop button to emit click_action');
-    assert.equal((sent.args[0] as { selectorPath?: string }).selectorPath, '#stop-agent');
+    const sent = env.mockSocket.emitted.find(item => item.event === 'command:stop_agent');
+    assert.ok(sent, 'Expected stop button to emit stop_agent');
+  });
+
+  it('does not enable stop for background tasks without stop selector', () => {
+    const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
+    fireFullState(env.mockSocket, {
+      ...fixture[0].state!,
+      backgroundTasks: [{ id: 'bg-1', label: 'npm run dev' }],
+      agentStopAvailable: false,
+      agentStopSource: 'none',
+    });
+
+    const stop = env.document.getElementById('btn-agent-stop') as HTMLButtonElement;
+    assert.equal(stop.disabled, true);
+  });
+
+  it('enables stop from background task stop selector even when agent status is idle', () => {
+    const fixture = loadFixture('activity-shimmer-lifecycle.jsonl');
+    fireFullState(env.mockSocket, {
+      ...fixture[0].state!,
+      backgroundTasks: [{ id: 'bg-1', label: 'npm run dev', stopSelectorPath: '#stop-bg' }],
+      agentStopAvailable: true,
+      agentStopSource: 'background_task',
+    });
+
+    const stop = env.document.getElementById('btn-agent-stop') as HTMLButtonElement;
+    assert.equal(stop.disabled, false);
   });
 });
 
@@ -492,6 +519,8 @@ describe('web: attachments', () => {
       backgroundTasks: [],
       gitStatus: null,
       agentStopSelectorPath: '',
+      agentStopAvailable: false,
+      agentStopSource: 'none',
     };
   }
 
@@ -564,6 +593,8 @@ describe('web: background tasks', () => {
       backgroundTasks: [],
       gitStatus: null,
       agentStopSelectorPath: '',
+      agentStopAvailable: false,
+      agentStopSource: 'none',
     };
   }
 
@@ -713,6 +744,8 @@ describe('web: git status', () => {
       backgroundTasks: [],
       gitStatus: null,
       agentStopSelectorPath: '',
+      agentStopAvailable: false,
+      agentStopSource: 'none',
     };
   }
 
@@ -888,6 +921,8 @@ describe('web: questionnaire widget', () => {
       backgroundTasks: [],
       gitStatus: null,
       agentStopSelectorPath: '',
+      agentStopAvailable: false,
+      agentStopSource: 'none',
     };
   }
 
@@ -904,8 +939,8 @@ describe('web: questionnaire widget', () => {
         {
           number: '1.', text: 'Pick a color?', isActive: true,
           options: [
-            { letter: 'A', label: 'Red', isFreeform: false, selectorPath: 'sp-red' },
-            { letter: 'B', label: 'Blue', isFreeform: false, selectorPath: 'sp-blue' },
+            { letter: 'A', label: 'Red', isFreeform: false, isSelected: true, selectorPath: 'sp-red' },
+            { letter: 'B', label: 'Blue', isFreeform: false, isSelected: false, selectorPath: 'sp-blue' },
           ],
         },
       ],
@@ -926,6 +961,8 @@ describe('web: questionnaire widget', () => {
     assert.equal(options.length, 2);
     assert.match(options[0].textContent!, /A.*Red/);
     assert.match(options[1].textContent!, /B.*Blue/);
+    assert.ok(options[0].classList.contains('questionnaire-option-selected'));
+    assert.ok(!options[1].classList.contains('questionnaire-option-selected'));
   });
 
   it('disables continue button when continueDisabled is true', () => {
@@ -973,5 +1010,39 @@ describe('web: questionnaire widget', () => {
     assert.equal(questions.length, 2);
     assert.ok(!questions[0].classList.contains('questionnaire-question-active'));
     assert.ok(questions[1].classList.contains('questionnaire-question-active'));
+  });
+
+  it('updates selected questionnaire option optimistically on click', () => {
+    const state = baseState();
+    state.questionnaire = {
+      questions: [
+        {
+          number: '1.',
+          text: 'Pick a color?',
+          isActive: true,
+          options: [
+            { letter: 'A', label: 'Red', isFreeform: false, isSelected: true, selectorPath: 'sp-red' },
+            { letter: 'B', label: 'Blue', isFreeform: false, isSelected: false, selectorPath: 'sp-blue' },
+          ],
+        },
+      ],
+      activeIndex: 0,
+      totalLabel: '1 of 1',
+      skipSelectorPath: 'sp-skip',
+      continueSelectorPath: 'sp-continue',
+      continueDisabled: true,
+    };
+    fireFullState(env.mockSocket, state);
+
+    const options = env.document.querySelectorAll('.questionnaire-option');
+    const optionB = options[1] as HTMLButtonElement;
+    act(() => optionB.click());
+
+    assert.ok(!options[0].classList.contains('questionnaire-option-selected'));
+    assert.ok(options[1].classList.contains('questionnaire-option-selected'));
+
+    const sent = env.mockSocket.emitted.findLast(item => item.event === 'command:click_action');
+    assert.ok(sent, 'Expected questionnaire option click_action');
+    assert.equal((sent.args[0] as { selectorPath?: string }).selectorPath, 'sp-blue');
   });
 });

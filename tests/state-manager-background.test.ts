@@ -28,6 +28,8 @@ function baseState(overrides: Partial<CursorState> = {}): CursorState {
     backgroundTasks: [],
     gitStatus: null,
     agentStopSelectorPath: '',
+    agentStopAvailable: false,
+    agentStopSource: 'none',
     ...overrides,
   };
 }

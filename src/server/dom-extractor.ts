@@ -1606,6 +1606,10 @@ export function extractionFunction(
     const agentStopSelectorPath = agentStopButton
       ? buildSelectorPath(agentStopButton)
       : (backgroundTasks.find((task) => task.stopSelectorPath)?.stopSelectorPath ?? '');
+    const agentStopSource = agentStopButton
+      ? 'composer'
+      : (backgroundTasks.some((task) => task.stopSelectorPath) ? 'background_task' : 'none');
+    const agentStopAvailable = agentStopSource !== 'none';
 
     // --- Agent status ---
     const statusEl = findFirst(statusSelectors);
@@ -2009,7 +2013,7 @@ export function extractionFunction(
     }
 
     // --- Questionnaire widget ---
-    type QOption = { letter: string; label: string; isFreeform: boolean; selectorPath: string };
+    type QOption = { letter: string; label: string; isFreeform: boolean; isSelected?: boolean; selectorPath: string };
     type QQuestion = { number: string; text: string; options: QOption[]; isActive: boolean };
     let questionnaire: {
       questions: QQuestion[];
@@ -2039,8 +2043,16 @@ export function extractionFunction(
           const letter = (letterBtn?.textContent || '').trim();
           const isFreeform = optEl.classList.contains('composer-questionnaire-toolbar-option-freeform');
           const label = isFreeform ? 'Other' : (optEl.querySelector('.composer-questionnaire-toolbar-option-label')?.textContent || '').trim();
+          const cls = (optEl.getAttribute('class') || '').toLowerCase();
+          const isSelected =
+            optEl.classList.contains('composer-questionnaire-toolbar-option-selected')
+            || cls.includes('selected')
+            || optEl.getAttribute('aria-pressed') === 'true'
+            || optEl.getAttribute('aria-selected') === 'true'
+            || optEl.getAttribute('data-active') === 'true'
+            || optEl.getAttribute('data-state') === 'active';
           const clickTarget = letterBtn || optEl;
-          options.push({ letter, label, isFreeform, selectorPath: buildSelectorPath(clickTarget as Element) });
+          options.push({ letter, label, isFreeform, isSelected, selectorPath: buildSelectorPath(clickTarget as Element) });
         }
         questions.push({ number: num, text, options, isActive });
       }
@@ -2093,6 +2105,8 @@ export function extractionFunction(
       backgroundTasks,
       gitStatus: null,
       agentStopSelectorPath,
+      agentStopAvailable,
+      agentStopSource,
       _rawSignals,
     };
   } catch {

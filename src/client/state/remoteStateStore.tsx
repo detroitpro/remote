@@ -25,6 +25,8 @@ export const defaultCursorState: CursorState = {
   backgroundTasks: [],
   gitStatus: null,
   agentStopSelectorPath: '',
+  agentStopAvailable: false,
+  agentStopSource: 'none',
 };
 
 export const RemoteStateContext = createContext<CursorState>(defaultCursorState);

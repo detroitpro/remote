@@ -3,9 +3,13 @@ import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
-function moduleDir(): string {
+export function getServerModuleDir(): string {
   if (typeof __dirname !== 'undefined') return __dirname;
   return dirname(fileURLToPath(import.meta.url));
+}
+
+function moduleDir(): string {
+  return getServerModuleDir();
 }
 
 function loadPackageVersion(): string {

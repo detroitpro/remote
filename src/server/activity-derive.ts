@@ -175,9 +175,12 @@ export function deriveActivityFromSignals(
 export function applyDerivedActivityToState(state: CursorState): CursorState {
   if (!state._rawSignals) return state;
   const derived = deriveActivityFromSignals(state._rawSignals, state.messages, state.agentStatus);
+  const preserveBusyStatus = derived.status === 'idle'
+    && (state.agentStopAvailable || !!state.agentStopSelectorPath)
+    && (state.agentStatus === 'generating' || state.agentStatus === 'running_tool' || state.agentStatus === 'thinking');
   return {
     ...state,
-    agentStatus: derived.status,
+    agentStatus: preserveBusyStatus ? state.agentStatus : derived.status,
     agentActivityText: derived.activityText,
     agentActivityLive: derived.isLive,
     agentActivitySource: derived.source,
