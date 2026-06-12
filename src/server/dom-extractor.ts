@@ -2086,10 +2086,12 @@ export function extractionFunction(
       const actionsContainer = qToolbar.querySelector('.composer-questionnaire-toolbar-actions');
       if (actionsContainer) {
         const skipBtn = actionsContainer.querySelector('.composer-skip-button');
-        if (skipBtn) skipPath = buildSelectorPath(skipBtn as Element);
+        if (skipBtn) {
+          skipPath = '.composer-questionnaire-toolbar .composer-skip-button';
+        }
         const contBtn = actionsContainer.querySelector('.composer-run-button');
         if (contBtn) {
-          continuePath = buildSelectorPath(contBtn as Element);
+          continuePath = '.composer-questionnaire-toolbar .composer-questionnaire-toolbar-actions .composer-run-button:not([data-disabled="true"])';
           continueDisabled = contBtn.getAttribute('data-disabled') === 'true';
         }
       }

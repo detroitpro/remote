@@ -12,6 +12,17 @@ describe('cdp client click behavior', () => {
     assert.equal(shouldUseNativeClick('DIV', 'button'), false);
   });
 
+  it('keeps DOM click for Cursor composer action divs', () => {
+    assert.equal(
+      shouldUseNativeClick('DIV', null, { className: 'anysphere-button composer-run-button', clickReady: true }),
+      false,
+    );
+    assert.equal(
+      shouldUseNativeClick('DIV', null, { className: 'composer-skip-button', clickReady: false }),
+      false,
+    );
+  });
+
   it('dispatches native mouse events when native click is preferred', async () => {
     const client = new CdpClient();
     const sent: Array<{ method: string; params?: Record<string, unknown> }> = [];

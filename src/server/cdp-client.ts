@@ -3,7 +3,16 @@ import { EventEmitter } from 'events';
 
 const DEFAULT_TIMEOUT_MS = 10000;
 
-export function shouldUseNativeClick(tagName: string | null | undefined, role: string | null | undefined): boolean {
+export function shouldUseNativeClick(
+  tagName: string | null | undefined,
+  role: string | null | undefined,
+  options?: { className?: string | null; clickReady?: boolean },
+): boolean {
+  if (options?.clickReady) return false;
+  const className = String(options?.className || '').toLowerCase();
+  if (className.includes('composer-run-button') || className.includes('composer-skip-button')) {
+    return false;
+  }
   const tag = String(tagName || '').trim().toLowerCase();
   const normalizedRole = String(role || '').trim().toLowerCase();
   const domClickableTags = new Set(['button', 'a', 'input', 'textarea', 'select', 'option', 'label', 'summary']);
@@ -171,9 +180,17 @@ export class CdpClient extends EventEmitter {
         el.scrollIntoView({ block: 'center', behavior: 'instant' });
         const tagName = (el.tagName || '').toLowerCase();
         const role = (el.getAttribute('role') || '').toLowerCase();
+        const className = el.getAttribute('class') || '';
+        const clickReady = el.getAttribute('data-click-ready') === 'true';
         const domClickableTags = new Set(['button', 'a', 'input', 'textarea', 'select', 'option', 'label', 'summary']);
         const domClickableRoles = new Set(['button', 'link', 'menuitem', 'option', 'checkbox', 'radio', 'switch', 'tab']);
-        const useNative = !domClickableTags.has(tagName) && !domClickableRoles.has(role);
+        const isComposerAction =
+          className.includes('composer-run-button') || className.includes('composer-skip-button');
+        const useNative =
+          !clickReady
+          && !isComposerAction
+          && !domClickableTags.has(tagName)
+          && !domClickableRoles.has(role);
         if (!useNative) {
           el.click();
           return { ok: true, usedNative: false };

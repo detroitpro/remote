@@ -632,8 +632,23 @@ export class CommandExecutor {
 
   async clickAction(commandId: string, selectorPath: string): Promise<CommandResult> {
     return this.withRetry(commandId, async (client) => {
-      await client.click(selectorPath);
-      console.log(`[command-executor] Clicked action: ${selectorPath.substring(0, 60)}`);
+      const strategies = [
+        selectorPath,
+        '.composer-questionnaire-toolbar .composer-questionnaire-toolbar-actions .composer-run-button:not([data-disabled="true"])',
+        '.composer-questionnaire-toolbar .composer-skip-button',
+      ].filter((sel, index, all) => !!sel && all.indexOf(sel) === index);
+
+      let lastError: string | undefined;
+      for (const sel of strategies) {
+        try {
+          await client.click(sel);
+          console.log(`[command-executor] Clicked action: ${sel.substring(0, 80)}`);
+          return;
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : String(err);
+        }
+      }
+      throw new Error(lastError || 'Action element not found');
     });
   }
 

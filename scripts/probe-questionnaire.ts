@@ -91,11 +91,17 @@ async function main() {
         questionCount: questions.length,
         questions,
         actions: {
-          skip: skipBtn ? { class: skipBtn.getAttribute('class'), text: (skipBtn.textContent || '').trim() } : null,
+          skip: skipBtn ? {
+            class: skipBtn.getAttribute('class'),
+            text: (skipBtn.textContent || '').trim(),
+            stableSelector: '.composer-questionnaire-toolbar .composer-skip-button',
+          } : null,
           continue: contBtn ? {
             class: contBtn.getAttribute('class'),
             text: (contBtn.textContent || '').trim(),
-            disabled: contBtn.hasAttribute('disabled') || contBtn.getAttribute('aria-disabled') === 'true',
+            disabled: contBtn.getAttribute('data-disabled') === 'true',
+            clickReady: contBtn.getAttribute('data-click-ready') === 'true',
+            stableSelector: '.composer-questionnaire-toolbar .composer-questionnaire-toolbar-actions .composer-run-button:not([data-disabled="true"])',
           } : null,
         },
       };
