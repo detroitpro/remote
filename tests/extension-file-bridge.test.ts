@@ -55,6 +55,33 @@ describe('extension file bridge', () => {
     assert.equal(manager.getCurrentState().gitStatus?.windowKey, 'cursor-ide-remote');
   });
 
+  it('reloadGitStatusFromDisk rehydrates git status after state was cleared', () => {
+    const dataDir = makeTempDir();
+    const manager = new StateManager(0);
+    manager.updateWindows([{ id: 'w1', title: 'cursor-ide-remote', url: '' }], 'w1');
+    const bridge = new ExtensionFileBridge(dataDir, manager);
+    bridge.start();
+
+    writeFileSync(gitStatusBridgePath(dataDir), JSON.stringify({
+      available: true,
+      changedCount: 4,
+      repoLabel: 'cursor-ide-remote',
+      updatedAt: Date.now(),
+      source: 'vscode.git',
+      windowKey: 'cursor-ide-remote',
+    }) + '\n', 'utf-8');
+
+    bridge.reloadGitStatusFromDisk();
+    assert.equal(manager.getCurrentState().gitStatus?.changedCount, 4);
+
+    manager.updateGitStatus(null);
+    assert.equal(manager.getCurrentState().gitStatus, null);
+
+    bridge.reloadGitStatusFromDisk();
+    assert.equal(manager.getCurrentState().gitStatus?.changedCount, 4);
+    bridge.stop();
+  });
+
   it('reports bridge diagnostics for git status files', () => {
     const dataDir = makeTempDir();
     const manager = new StateManager(0);

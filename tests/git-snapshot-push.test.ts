@@ -123,4 +123,72 @@ describe('git snapshot push store', () => {
 
     assert.equal(manager.getCurrentState().gitStatus?.changedCount, 36);
   });
+
+  it('hydrateGitStatus restores gitStatus from stored snapshots after reload-like null state', () => {
+    const manager = new StateManager(0);
+    manager.updateWindows([
+      { id: 'w1', title: 'unexpected-cdp-title', url: '', wsUrl: 'ws://a' },
+    ], 'w1');
+
+    manager.upsertGitWindowSnapshot({
+      windowKey: 'cursor-ide-remote',
+      updatedAt: Date.now(),
+      gitStatus: {
+        available: true,
+        changedCount: 3,
+        repoLabel: 'cursor-ide-remote',
+        updatedAt: Date.now(),
+        source: 'vscode.git',
+        windowKey: 'cursor-ide-remote',
+      },
+    });
+    assert.equal(manager.getCurrentState().gitStatus?.changedCount, 3);
+
+    manager.updateGitStatus(null);
+    assert.equal(manager.getCurrentState().gitStatus, null);
+
+    manager.hydrateGitStatus();
+    assert.equal(manager.getCurrentState().gitStatus?.changedCount, 3);
+  });
+
+  it('syncGitStatusForActiveWindow uses last pushed snapshot when titles are stale', () => {
+    const manager = new StateManager(0);
+    manager.updateWindows([
+      { id: 'w1', title: 'repo-a', url: '', wsUrl: 'ws://a' },
+      { id: 'w2', title: 'repo-b', url: '', wsUrl: 'ws://b' },
+    ], 'w1');
+
+    manager.upsertGitWindowSnapshot({
+      windowKey: 'repo-a',
+      updatedAt: Date.now(),
+      gitStatus: {
+        available: true,
+        changedCount: 11,
+        repoLabel: 'repo-a',
+        updatedAt: Date.now(),
+        source: 'vscode.git',
+        windowKey: 'repo-a',
+      },
+    });
+    manager.upsertGitWindowSnapshot({
+      windowKey: 'repo-b',
+      updatedAt: Date.now(),
+      gitStatus: {
+        available: true,
+        changedCount: 22,
+        repoLabel: 'repo-b',
+        updatedAt: Date.now(),
+        source: 'vscode.git',
+        windowKey: 'repo-b',
+      },
+    });
+    assert.equal(manager.getCurrentState().gitStatus?.changedCount, 11);
+
+    manager.updateWindows([
+      { id: 'w1', title: 'unknown-a', url: '', wsUrl: 'ws://a' },
+      { id: 'w2', title: 'unknown-b', url: '', wsUrl: 'ws://b' },
+    ], 'w2');
+
+    assert.equal(manager.getCurrentState().gitStatus?.changedCount, 22);
+  });
 });

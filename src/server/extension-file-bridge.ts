@@ -48,6 +48,12 @@ export class ExtensionFileBridge {
     }
   }
 
+  /** Re-read git-status.json even when contents are unchanged (e.g. new web client connected). */
+  reloadGitStatusFromDisk(): void {
+    this.lastGitStatusRaw = '';
+    this.refreshGitStatus();
+  }
+
   getDiagnostics(): ExtensionBridgeDiagnostics {
     const gitPath = gitStatusBridgePath(this.dataDir);
     const debugPath = gitBridgeDebugPath(this.dataDir);

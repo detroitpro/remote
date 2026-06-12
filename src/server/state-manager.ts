@@ -403,21 +403,49 @@ export class StateManager extends EventEmitter {
     };
   }
 
-  private syncGitStatusForActiveWindow(): GitStatusInfo | null | undefined {
+  /** Reconcile gitStatus from stored window snapshots (e.g. before state:full on socket connect). */
+  hydrateGitStatus(): void {
+    this.syncGitStatusForActiveWindow();
+  }
+
+  private pickGitSnapshotForActiveWindow(): GitWindowSnapshot | undefined {
     const activeWindow = this.currentState.windows.find(
       window => window.id === this.currentState.activeWindowId,
     );
-    const snapshot = resolveGitSnapshotForActiveWindow(
+    let snapshot = resolveGitSnapshotForActiveWindow(
       activeWindow?.title,
       this.gitWindowSnapshots,
     );
-    this.activeGitWindowKey = snapshot?.windowKey ?? null;
-    const nextGitStatus = snapshot?.gitStatus ?? null;
-    if (JSON.stringify(this.currentState.gitStatus) === JSON.stringify(nextGitStatus)) {
+    if (!snapshot && this.lastGitPushWindowKey) {
+      snapshot = this.gitWindowSnapshots.get(this.lastGitPushWindowKey);
+    }
+    if (!snapshot && this.activeGitWindowKey) {
+      snapshot = this.gitWindowSnapshots.get(this.activeGitWindowKey);
+    }
+    return snapshot;
+  }
+
+  private syncGitStatusForActiveWindow(): GitStatusInfo | null | undefined {
+    const snapshot = this.pickGitSnapshotForActiveWindow();
+    if (snapshot) {
+      this.activeGitWindowKey = snapshot.windowKey;
+      const nextGitStatus = snapshot.gitStatus;
+      if (JSON.stringify(this.currentState.gitStatus) === JSON.stringify(nextGitStatus)) {
+        return undefined;
+      }
+      this.currentState = { ...this.currentState, gitStatus: nextGitStatus };
+      return nextGitStatus;
+    }
+
+    this.activeGitWindowKey = null;
+    if (this.currentState.gitStatus !== null && this.gitWindowSnapshots.size > 0) {
       return undefined;
     }
-    this.currentState = { ...this.currentState, gitStatus: nextGitStatus };
-    return nextGitStatus;
+    if (this.currentState.gitStatus === null) {
+      return undefined;
+    }
+    this.currentState = { ...this.currentState, gitStatus: null };
+    return null;
   }
 
   private diff(
