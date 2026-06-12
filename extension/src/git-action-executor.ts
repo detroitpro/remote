@@ -11,7 +11,7 @@ interface GitRepository {
   rootUri: vscode.Uri;
   add?(resources: string[] | vscode.Uri[], opts?: { update?: boolean }): Promise<void>;
   restore?(resources: string[] | vscode.Uri[], options?: { staged?: boolean }): Promise<void>;
-  revert?(resources: vscode.Uri[]): Promise<void>;
+  revert?(resources: string[] | vscode.Uri[]): Promise<void>;
   diffWithHEAD?(path: string): Promise<string>;
   diffIndexWithHEAD?(path: string): Promise<string>;
   state: {
@@ -188,17 +188,18 @@ export class GitActionExecutor {
     }
     const paths = relativePaths.map(path => this.normalizeRepoPath(path));
     const uris = paths.map(path => this.resolveResourceUri(repo, path));
+    const absolutePaths = uris.map(uri => uri.fsPath);
 
     try {
-      this.logAttempt('stage', `repo.add(paths) paths=${JSON.stringify(paths)}`);
-      await repo.add(paths);
+      this.logAttempt('stage', `repo.add(absPaths) paths=${JSON.stringify(absolutePaths)}`);
+      await repo.add(absolutePaths);
       return;
     } catch (err) {
       const firstDebug = this.describeError(err);
-      this.outputChannel.warn(`[git-action:stage] repo.add(paths) failed: ${firstDebug.join(' | ')}`);
+      this.outputChannel.warn(`[git-action:stage] repo.add(absPaths) failed: ${firstDebug.join(' | ')}`);
       if (!this.isPathTypeError(err)) {
         throw this.makeDebugError(this.errorSummary(err), [
-          'attempt=repo.add(paths)',
+          'attempt=repo.add(absPaths)',
           ...firstDebug,
         ]);
       }
@@ -213,7 +214,7 @@ export class GitActionExecutor {
           `[git-action:stage] repo.add(uris) failed: ${fallbackDebug.join(' | ')}`,
         );
         throw this.makeDebugError(this.errorSummary(fallbackErr), [
-          'attempt=repo.add(paths)',
+          'attempt=repo.add(absPaths)',
           ...firstDebug,
           'attempt=repo.add(uris)',
           ...fallbackDebug,
@@ -225,18 +226,19 @@ export class GitActionExecutor {
   private async unstageResources(repo: GitRepository, relativePaths: string[]): Promise<void> {
     const paths = relativePaths.map(path => this.normalizeRepoPath(path));
     const uris = paths.map(path => this.resolveResourceUri(repo, path));
+    const absolutePaths = uris.map(uri => uri.fsPath);
 
     if (repo.restore) {
       try {
-        this.logAttempt('unstage', `repo.restore(paths) paths=${JSON.stringify(paths)}`);
-        await repo.restore(paths, { staged: true });
+        this.logAttempt('unstage', `repo.restore(absPaths) paths=${JSON.stringify(absolutePaths)}`);
+        await repo.restore(absolutePaths, { staged: true });
         return;
       } catch (err) {
         const firstDebug = this.describeError(err);
-        this.outputChannel.warn(`[git-action:unstage] repo.restore(paths) failed: ${firstDebug.join(' | ')}`);
+        this.outputChannel.warn(`[git-action:unstage] repo.restore(absPaths) failed: ${firstDebug.join(' | ')}`);
         if (!this.isPathTypeError(err)) {
           throw this.makeDebugError(this.errorSummary(err), [
-            'attempt=repo.restore(paths)',
+            'attempt=repo.restore(absPaths)',
             ...firstDebug,
           ]);
         }
@@ -251,7 +253,7 @@ export class GitActionExecutor {
             `[git-action:unstage] repo.restore(uris) failed: ${fallbackDebug.join(' | ')}`,
           );
           throw this.makeDebugError(this.errorSummary(fallbackErr), [
-            'attempt=repo.restore(paths)',
+            'attempt=repo.restore(absPaths)',
             ...firstDebug,
             'attempt=repo.restore(uris)',
             ...fallbackDebug,
@@ -261,6 +263,21 @@ export class GitActionExecutor {
     }
 
     if (repo.revert) {
+      try {
+        this.logAttempt('unstage', `repo.revert(absPaths) paths=${JSON.stringify(absolutePaths)}`);
+        await repo.revert(absolutePaths);
+        return;
+      } catch (err) {
+        const firstDebug = this.describeError(err);
+        this.outputChannel.warn(`[git-action:unstage] repo.revert(absPaths) failed: ${firstDebug.join(' | ')}`);
+        if (!this.isPathTypeError(err)) {
+          throw this.makeDebugError(this.errorSummary(err), [
+            'attempt=repo.revert(absPaths)',
+            ...firstDebug,
+          ]);
+        }
+      }
+
       this.logAttempt('unstage', `repo.revert(uris) uris=${JSON.stringify(uris.map(uri => uri.toString()))}`);
       await repo.revert(uris);
       return;

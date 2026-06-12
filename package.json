@@ -248,6 +248,7 @@
     "test": "npx tsx --test tests/*.test.ts",
     "probe": "tsx scripts/probe-cdp.ts",
     "wait-record": "tsx scripts/wait-record.ts",
+    "--":"",
     "uu-safe-install": "npx uu-safe-install"
   },
   "dependencies": {

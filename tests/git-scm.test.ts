@@ -84,6 +84,26 @@ test('buildFileListFromRepo keeps partially staged file in staged and changes bu
   assert.ok(files.some(file => file.bucket === 'changes' && file.path === 'shared.ts'));
 });
 
+test('buildFileListFromRepo prefers resourceUri and keeps repo-relative Windows path', () => {
+  const files = buildFileListFromRepo({
+    rootUri: 'file:///R%3A/External/cursor-ide-remote',
+    state: {
+      workingTreeChanges: [{
+        uri: { toString: () => 'file:///C%3A/package.json', fsPath: 'C:\\package.json' },
+        resourceUri: {
+          toString: () => 'file:///R%3A/External/cursor-ide-remote/package.json',
+          fsPath: 'R:\\External\\cursor-ide-remote\\package.json',
+        },
+        status: 5,
+      }],
+    },
+  }, Date.now());
+
+  assert.equal(files.length, 1);
+  assert.equal(files[0]?.path, 'package.json');
+  assert.equal(files[0]?.displayPath, 'package.json');
+});
+
 test('filterFilesByBuckets supports changes tab buckets', async () => {
   const { filterFilesByBuckets } = await import('../src/shared/git-file-list.js');
   const files = [

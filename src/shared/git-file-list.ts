@@ -17,6 +17,18 @@ const BINARY_EXTENSIONS = new Set([
   '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.wasm', '.exe', '.dll',
 ]);
 
+function normalizeFsLikePath(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function uriLikeToPath(uriLike: { toString(): string; fsPath?: string } | undefined): string {
+  if (!uriLike) return '';
+  if (typeof uriLike.fsPath === 'string' && uriLike.fsPath.trim()) {
+    return uriLike.fsPath;
+  }
+  return uriLike.toString();
+}
+
 function uriToRelativePath(uri: string, rootUri: string): string {
   let filePath = uri;
   if (filePath.startsWith('file://')) {
@@ -34,12 +46,14 @@ function uriToRelativePath(uri: string, rootUri: string): string {
     }
   }
 
-  const normalizedRoot = rootPath.replace(/\\/g, '/').replace(/\/+$/, '');
-  const normalizedFile = filePath.replace(/\\/g, '/');
-  if (normalizedFile.startsWith(normalizedRoot + '/')) {
+  const normalizedRoot = normalizeFsLikePath(rootPath);
+  const normalizedFile = normalizeFsLikePath(filePath);
+  const comparableRoot = normalizedRoot.toLowerCase();
+  const comparableFile = normalizedFile.toLowerCase();
+  if (comparableFile.startsWith(comparableRoot + '/')) {
     return normalizedFile.slice(normalizedRoot.length + 1);
   }
-  if (normalizedFile === normalizedRoot) {
+  if (comparableFile === comparableRoot) {
     return normalizedFile.split('/').pop() ?? normalizedFile;
   }
   return normalizedFile.split('/').pop() ?? normalizedFile;
@@ -88,12 +102,12 @@ function buildFileEntry(
   change: GitChangeEntryLike,
   updatedAt: number,
 ): GitFileSummary {
-  const primaryUri = change.uri ?? change.resourceUri;
-  const uriStr = primaryUri?.toString() ?? '';
+  const primaryUri = change.resourceUri ?? change.uri;
+  const uriStr = uriLikeToPath(primaryUri);
   const path = uriToRelativePath(uriStr, rootUri);
   const renameUri = change.renameUri ?? change.originalUri;
   const originalPath = renameUri
-    ? uriToRelativePath(renameUri.toString(), rootUri)
+    ? uriToRelativePath(uriLikeToPath(renameUri), rootUri)
     : null;
   const isRename = originalPath != null && originalPath !== path;
   const displayPath = isRename ? `${originalPath} → ${path}` : path;
