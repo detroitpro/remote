@@ -6,6 +6,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Removed
+- License key requirement for development and runtime (temporary until monetization is re-enabled).
+
 ## [0.1.46] - 2026-05-27
 
 ### Fixed

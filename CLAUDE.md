@@ -62,5 +62,5 @@ Key architectural patterns:
 - **Modules communicate via EventEmitter**, not direct imports. Wiring happens in `index.ts`.
 - **DOM selectors** for non-message elements come from `selectors.json` (loaded via config), never hardcoded.
 - **Message extraction** uses Cursor's `data-*` attributes (`data-flat-index`, `data-message-role`, etc.).
-- **Extension ↔ Server boundary**: the extension spawns the server as a child process. License validation is intentionally duplicated between `extension/src/license-manager.ts` and `src/server/license.ts`.
+- **Extension ↔ Server boundary**: the extension spawns the server as a child process and passes configuration via environment variables.
 - **Two repos**: this dev repo (`~/Dev/cursor-ide-remote/`) and public repo (`~/Dev/CursorRemote/`). Publishing uses `npm run publish:public`.

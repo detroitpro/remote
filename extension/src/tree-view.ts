@@ -1,6 +1,10 @@
 import * as vscode from 'vscode';
 import type { ServerManager } from './server-manager.js';
+<<<<<<< Updated upstream
 import type { LicenseManager } from './license-manager.js';
+=======
+import type { GitStateBridge } from './git-state-bridge.js';
+>>>>>>> Stashed changes
 import type { HealthData } from './status-bar.js';
 
 type TreeItem = vscode.TreeItem;
@@ -10,6 +14,7 @@ export class StatusTreeView implements vscode.TreeDataProvider<TreeItem> {
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   private serverManager: ServerManager;
+<<<<<<< Updated upstream
   private licenseManager: LicenseManager;
   private licensed = false;
   private version: string;
@@ -17,22 +22,35 @@ export class StatusTreeView implements vscode.TreeDataProvider<TreeItem> {
   constructor(serverManager: ServerManager, licenseManager: LicenseManager, version: string) {
     this.serverManager = serverManager;
     this.licenseManager = licenseManager;
+=======
+  private gitStateBridge: GitStateBridge | null;
+  private version: string;
+
+  constructor(
+    serverManager: ServerManager,
+    version: string,
+    gitStateBridge?: GitStateBridge,
+  ) {
+    this.serverManager = serverManager;
+    this.gitStateBridge = gitStateBridge ?? null;
+>>>>>>> Stashed changes
     this.version = version;
     serverManager.on('health', () => this.refresh());
     serverManager.on('stateChanged', () => this.refresh());
     serverManager.on('stopped', () => this.refresh());
+<<<<<<< Updated upstream
 
     licenseManager.checkLicense().then(valid => {
       this.licensed = valid;
       this.refresh();
     });
+=======
+    gitStateBridge?.onDidChangeLocalGitStatus(() => this.refresh());
+>>>>>>> Stashed changes
   }
 
   refresh(): void {
-    this.licenseManager.checkLicense().then(valid => {
-      this.licensed = valid;
-      this._onDidChangeTreeData.fire(undefined);
-    });
+    this._onDidChangeTreeData.fire(undefined);
   }
 
   getTreeItem(element: TreeItem): TreeItem {
@@ -43,28 +61,6 @@ export class StatusTreeView implements vscode.TreeDataProvider<TreeItem> {
     if (element) return [];
 
     const items: TreeItem[] = [];
-
-    if (!this.licensed) {
-      const licenseItem = new vscode.TreeItem('License Key Required');
-      licenseItem.iconPath = new vscode.ThemeIcon('key', new vscode.ThemeColor('errorForeground'));
-      licenseItem.description = 'click to activate';
-      licenseItem.command = { command: 'cursorRemote.enterLicenseKey', title: 'Enter License Key' };
-      items.push(licenseItem);
-
-      const buyItem = new vscode.TreeItem('Buy License');
-      buyItem.iconPath = new vscode.ThemeIcon('credit-card');
-      buyItem.command = { command: 'cursorRemote.buyLicense', title: 'Buy License' };
-      items.push(buyItem);
-
-      items.push(separator());
-
-      const setupItem = new vscode.TreeItem('Open Setup Panel');
-      setupItem.iconPath = new vscode.ThemeIcon('gear');
-      setupItem.command = { command: 'cursorRemote.openSetup', title: 'Open Setup Panel' };
-      items.push(setupItem);
-
-      return items;
-    }
 
     const versionItem = new vscode.TreeItem(`CursorRemote v${this.version}`);
     versionItem.iconPath = new vscode.ThemeIcon('info');

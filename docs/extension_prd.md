@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-Package the CursorRemote relay server as a VS Code / Cursor extension. The extension wraps the server as a managed child process and provides native editor integration: settings UI, setup wizard, status bar, output channel, sidebar tree view, license management, and multi-window coordination. The server code, web client, and Telegram transport are bundled into the extension and run as a single child process. The bundled **web client** renders assistant **`codeBlocks`** and tool **`diffBlock`** as native code/diff UI (~7-line scroll viewport, full-screen reader, mobile touch targets; see `docs/prd.md` §6.11 and `docs/architecture.md` §2.6).
+Package the CursorRemote relay server as a VS Code / Cursor extension. The extension wraps the server as a managed child process and provides native editor integration: settings UI, setup wizard, status bar, output channel, sidebar tree view, and multi-window coordination. The server code, web client, and Telegram transport are bundled into the extension and run as a single child process. The bundled **web client** renders assistant **`codeBlocks`** and tool **`diffBlock`** as native code/diff UI (~7-line scroll viewport, full-screen reader, mobile touch targets; see `docs/prd.md` §6.11 and `docs/architecture.md` §2.6).
 
 ### 1.1 Problem Statement
 
@@ -19,7 +19,6 @@ Ship a VS Code / Cursor extension that:
 - Shows server and CDP connection status in the status bar and sidebar
 - Pipes server logs to a LogOutputChannel with built-in level filtering
 - Displays agent status, windows, and quick actions in a sidebar tree view with Start/Stop controls
-- Handles license key entry non-intrusively via the sidebar
 - Auto-generates a cryptographically random web client password on first install
 - Runs a single server instance across multiple Cursor windows (singleton pattern)
 - Bundles all server dependencies into a single file (no `node_modules` needed)
@@ -36,7 +35,7 @@ Ship a VS Code / Cursor extension that:
 ## 2. User Stories
 
 ### US-1: Install and Go
-**As a** Cursor user, **I want to** install the extension from a `.vsix` file, enter my license key, and have the server running, **so that** I don't need to clone a repo, install dependencies, or edit config files.
+**As a** Cursor user, **I want to** install the extension from a `.vsix` file and have the server running, **so that** I don't need to clone a repo, install dependencies, or edit config files.
 
 ### US-2: Auto-Start
 **As a** developer, **I want** the relay server to start automatically when Cursor launches, **so that** my phone client and Telegram bot are always available without manual intervention.
@@ -53,16 +52,13 @@ Ship a VS Code / Cursor extension that:
 ### US-6: Server Control
 **As a** developer, **I want** Start and Stop buttons in the sidebar, **so that** I can control the server without opening the Command Palette.
 
-### US-7: License Management
-**As a** user, **I want** the license prompt to be non-intrusive — shown in the sidebar with a "Buy" link, **so that** I'm not interrupted by popups on every startup.
-
-### US-8: Auto-Generated Password
+### US-7: Auto-Generated Password
 **As a** new user, **I want** a strong random password generated for me on first install, **so that** the web client is secure by default without manual configuration.
 
-### US-9: Multi-Window Safety
+### US-8: Multi-Window Safety
 **As a** developer with multiple Cursor windows, **I want** only one server running at a time with automatic recovery, **so that** I don't get port conflicts or duplicate Telegram bots.
 
-### US-10: Server Logs
+### US-9: Server Logs
 **As a** developer, **I want to** view server logs in the Output panel with level filtering, **so that** I can debug issues without switching to a terminal.
 
 ---
@@ -71,7 +67,7 @@ Ship a VS Code / Cursor extension that:
 
 The extension runs in the VS Code Extension Host (a Node.js process). It spawns the server as a child process and communicates via:
 
-1. **Environment variables** — configuration and license key passed at spawn time
+1. **Environment variables** — configuration passed at spawn time
 2. **HTTP polling** — `GET /health` every 5 seconds for status data
 3. **stdout/stderr parsing** — log lines piped to a LogOutputChannel
 
@@ -99,8 +95,6 @@ Only one server process runs across all Cursor windows:
 | `cursorRemote.openWebClient` | CursorRemote: Open Web Client | Open the browser client URL |
 | `cursorRemote.openSetup` | CursorRemote: Open Setup Panel | Open the networking and Telegram setup wizard |
 | `cursorRemote.showLogs` | CursorRemote: Show Logs | Show the Output Channel |
-| `cursorRemote.enterLicenseKey` | CursorRemote: Enter License Key | Prompt for a license key |
-| `cursorRemote.buyLicense` | CursorRemote: Buy License | Open the store URL (with UTM tags) |
 
 ---
 
@@ -149,12 +143,7 @@ Click opens the CursorRemote sidebar panel (not the command palette).
 
 Activity bar view container `cursorRemote` with a `TreeDataProvider` showing:
 
-### When unlicensed:
-- **License Key Required** (click to activate) — error-colored key icon
-- **Buy License** — links to store with UTM tags
-- **Open Setup Panel** — gear icon
-
-### When licensed, server running:
+### When server running:
 - **Server: Running** — green check icon, uptime in description, "observer" tag for non-owner windows
 - **Stop Server** — stop icon button
 - **CDP: Connected** — plug icon, active workspace name
@@ -167,7 +156,7 @@ Activity bar view container `cursorRemote` with a `TreeDataProvider` showing:
 - **Open Web Client** — external link icon
 - **Show Logs** — output icon
 
-### When licensed, server stopped:
+### When server stopped:
 - **Server: Stopped** — "click to start"
 - **Start Server** — play icon button
 - *(separator)*
@@ -203,60 +192,43 @@ Interactive configuration wizard opened via `cursorRemote.openSetup`. Created in
 
 ---
 
-## 9. License Flow
-
-1. On activation, extension reads key from `context.secrets`
-2. If valid: start server (if `autoStart` enabled)
-3. If missing/invalid: sidebar shows "License Key Required" item (non-intrusive — no popup)
-4. User clicks to enter key via `showInputBox` with format validation
-5. Valid key stored in `context.secrets.store('cursorRemote.licenseKey', key)`
-6. Key passed to server child process via `LICENSE_KEY` env var
-7. Server's own `checkLicense()` validates independently (defense-in-depth)
-8. "Buy License" in sidebar opens the store URL with UTM tracking (`?utm_source=extension&utm_medium=sidebar&utm_campaign=license`)
-
----
-
-## 10. Getting Started Walkthrough
+## 9. Getting Started Walkthrough
 
 A `contributes.walkthroughs` entry provides a step-by-step onboarding flow:
 
-1. **Enter License Key** — with command link and buy link (UTM-tagged)
-2. **Verify CDP Connection** — instructions for `--remote-debugging-port=9222`, start server command
-3. **Configure Networking** — open Setup Panel command
-4. **Set Up Telegram** — optional, open Setup Panel command
-5. **Done** — summary with link to documentation
+1. **Verify CDP Connection** — instructions for `--remote-debugging-port=9222`, start server command
+2. **Configure Networking** — open Setup Panel command
+3. **Set Up Telegram** — optional, open Setup Panel command
+4. **Done** — summary with link to documentation
 
 ---
 
-## 11. Server-Side Enhancements
+## 10. Server-Side Enhancements
 
 Backward-compatible changes to support the extension:
 
-### 11.1 Richer `/health` endpoint
+### 10.1 Richer `/health` endpoint
 Returns `windows`, `activeWindowId`, `mode`, `model`, `chatTabCount`, `pendingApprovalCount`, `generation`, `uptime`, `authRequired`. Existing clients ignore unknown fields.
 
-### 11.2 `LICENSE_KEY` env var
-Read license key from `process.env.LICENSE_KEY` before falling back to `data/license.key` file.
-
-### 11.3 `DATA_DIR` env var
+### 10.2 `DATA_DIR` env var
 Configurable data directory (default: `./data`). Extension sets this to `context.globalStorageUri.fsPath`.
 
-### 11.4 `LOG_FORMAT` env var
+### 10.3 `LOG_FORMAT` env var
 When set to `json`, emit structured JSON lines to stdout.
 
-### 11.5 Cache-busting static serving
+### 10.4 Cache-busting static serving
 `GET /` dynamically reads `index.html` and injects `?v=<random>` query parameters on `app.js` and `styles.css` tags. Static files served with `Cache-Control: no-cache, must-revalidate`.
 
-### 11.6 Auth middleware ordering
+### 10.5 Auth middleware ordering
 `/health` and static files are served before the auth middleware, preventing redirect loops when the web client checks authentication state.
 
-### 11.7 grammY native fetch
+### 10.6 grammY native fetch
 The Telegram bot is constructed with `{ client: { fetch } }` to use Node.js's native `fetch` API. grammY's default HTTP client (based on `node:https` / `node-fetch`) breaks in the esbuild-bundled ESM environment.
 
-### 11.8 Graceful Telegram shutdown
+### 10.7 Graceful Telegram shutdown
 `bot.stop()` is awaited with a 3-second timeout during server shutdown, ensuring the long-polling session is cleanly closed and the next server instance can connect immediately.
 
-### 11.9 Telegram connectivity diagnostics
+### 10.8 Telegram connectivity diagnostics
 On startup, the server tests outbound HTTPS with raw `fetch` to `api.telegram.org/bot<token>/getMe` and `deleteWebhook`. If unreachable, it tests `google.com` to distinguish between Telegram-specific blocks and general network issues.
 
 ---
@@ -295,7 +267,6 @@ Every enhancement is gated behind an env var that defaults to existing behavior:
 
 | Env var | Default (standalone) | Extension sets |
 |---|---|---|
-| `LICENSE_KEY` | not set → reads `data/license.key` | key from Secrets API |
 | `DATA_DIR` | not set → `./data` | `context.globalStorageUri.fsPath` |
 | `LOG_FORMAT` | not set → plain text | `json` |
 

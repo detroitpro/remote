@@ -47,18 +47,6 @@
         "title": "CursorRemote: Show Logs"
       },
       {
-        "command": "cursorRemote.enterLicenseKey",
-        "title": "CursorRemote: Enter License Key"
-      },
-      {
-        "command": "cursorRemote.buyLicense",
-        "title": "CursorRemote: Buy License"
-      },
-      {
-        "command": "cursorRemote.clearLicenseKey",
-        "title": "CursorRemote: Clear License Key"
-      },
-      {
         "command": "cursorRemote.openSetup",
         "title": "CursorRemote: Open Setup Panel"
       }
@@ -166,17 +154,6 @@
         "title": "Get Started with CursorRemote",
         "description": "Monitor sessions, approve steps, and send tasks from your phone or Telegram.",
         "steps": [
-          {
-            "id": "cursorRemote.walkthrough.license",
-            "title": "Enter License Key",
-            "description": "Enter your license key to activate CursorRemote.\n\n[Enter License Key](command:cursorRemote.enterLicenseKey)\n\nDon't have a key? [Buy one here](https://cursor-remote.com/buy?utm_source=extension&utm_medium=walkthrough&utm_campaign=license).",
-            "media": {
-              "markdown": "extension/media/walkthrough/license.md"
-            },
-            "completionEvents": [
-              "onCommand:cursorRemote.enterLicenseKey"
-            ]
-          },
           {
             "id": "cursorRemote.walkthrough.cdp",
             "title": "Verify CDP Connection",

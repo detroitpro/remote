@@ -358,7 +358,6 @@ cursor-ide-remote/
 │   ├── src/
 │   │   ├── extension.ts           # VS Code extension entry point
 │   │   ├── server-manager.ts      # Child process lifecycle + health polling
-│   │   ├── license-manager.ts     # License validation + buy link
 │   │   ├── status-bar.ts          # Status bar item
 │   │   ├── output-channel.ts      # OutputChannel wrapper
 │   │   ├── config-bridge.ts       # VS Code settings → env vars
@@ -368,7 +367,7 @@ cursor-ide-remote/
 │   ├── esbuild.js                 # Extension bundler config
 │   └── tsconfig.json              # Extension-specific tsconfig
 ├── scripts/
-│   ├── dev-wrapper.ts             # Dev startup (license prompt)
+│   ├── dev-wrapper.ts             # Dev startup (tsx watch wrapper)
 │   └── release.ts                 # Version bump + changelog + tag
 ├── selectors.json                # Externalized DOM selectors (user-editable)
 ├── package.json
@@ -458,11 +457,11 @@ Full specification: `docs/extension_prd.md`.
 ### 7.1 Architecture
 
 The extension runs in the Extension Host (a Node.js process). It communicates with the server via:
-1. **Environment variables** — configuration and license key passed at spawn time
+1. **Environment variables** — configuration passed at spawn time
 2. **HTTP polling** — `GET /health` every 5 seconds for status data
 3. **stdout/stderr parsing** — server log lines piped to a `LogOutputChannel`
 
-The extension never imports server modules. License validation logic is duplicated intentionally — the extension bundle cannot share code with the server.
+The extension never imports server modules.
 
 **Singleton server pattern:** Only one server process runs across all Cursor windows. On startup, `ServerManager` probes `GET /health` on the configured port. If a server is already running, the window attaches as an **observer** (polling health without owning the process). If not, it spawns the server and becomes the **owner**. If the owner window closes:
 
@@ -479,7 +478,6 @@ Race conditions during simultaneous spawns are handled by catching `EADDRINUSE` 
 | --- | --- |
 | `extension/src/extension.ts` | Activate/deactivate, command registration, auto-start, password generation |
 | `extension/src/server-manager.ts` | Singleton lifecycle: spawn/kill, owner/observer, health polling, auto-recovery |
-| `extension/src/license-manager.ts` | Validate key, VS Code Secrets API storage, buy link |
 | `extension/src/config-bridge.ts` | Read VS Code settings → env vars for child process |
 | `extension/src/status-bar.ts` | Status bar item with connection state colors |
 | `extension/src/output-channel.ts` | `LogOutputChannel` wrapper with `info`/`warn`/`error` level support |
@@ -507,7 +505,6 @@ These env vars are set by the extension when spawning the server as a child proc
 
 | Env Var | Default (standalone) | Extension sets | Purpose |
 | --- | --- | --- | --- |
-| `LICENSE_KEY` | not set → reads `data/license.key` | Key from VS Code secrets API | Pass license without file I/O |
 | `DATA_DIR` | not set → `./data` | `context.globalStorageUri` | Persistent storage isolated from extension install dir |
 | `LOG_FORMAT` | not set → timestamped plain text | `json` | Structured JSON lines for Output Channel parsing |
 

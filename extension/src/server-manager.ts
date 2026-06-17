@@ -22,7 +22,12 @@ export class ServerManager extends EventEmitter {
   private _isOwner = false;
   private _takingOver = false;
   private _reactingToFlag = false;
+<<<<<<< Updated upstream
   private getLicenseKey: () => Promise<string | undefined>;
+=======
+  private _startInFlight: Promise<void> | null = null;
+  private getLocalGitStatus: (() => GitLocalStatusSummary | null) | null = null;
+>>>>>>> Stashed changes
   private readonly windowName: string;
   private readonly manualStopPath: string;
   private dirWatcher: FSWatcher | null = null;
@@ -43,13 +48,11 @@ export class ServerManager extends EventEmitter {
     context: vscode.ExtensionContext,
     outputChannel: UnifiedOutputChannel,
     statusBarItem: vscode.StatusBarItem,
-    getLicenseKey: () => Promise<string | undefined>
   ) {
     super();
     this.context = context;
     this.outputChannel = outputChannel;
     this.statusBarItem = statusBarItem;
-    this.getLicenseKey = getLicenseKey;
     this.windowName = vscode.workspace.name
       ?? vscode.workspace.workspaceFolders?.[0]?.name
       ?? 'unknown';
@@ -145,8 +148,7 @@ export class ServerManager extends EventEmitter {
       return;
     }
 
-    const licenseKey = await this.getLicenseKey();
-    const env = buildEnvFromConfig(this.context, licenseKey);
+    const env = buildEnvFromConfig(this.context);
 
     const dataDir = env.DATA_DIR;
     if (!existsSync(dataDir)) {
